@@ -1,0 +1,89 @@
+name: Deploy serverless na AWS
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  STACK_NAME: ${{ vars.STACK_NAME || 'site-torneio-sinuca' }}
+  AWS_REGION: ${{ vars.AWS_REGION || 'sa-east-1' }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar codigo
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Configurar AWS SAM
+        uses: aws-actions/setup-sam@v2
+
+      - name: Configurar credenciais AWS via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Build SAM
+        run: sam build --template-file template.yaml
+
+      - name: Deploy infraestrutura e backend
+        run: |
+          sam deploy \
+            --stack-name "$STACK_NAME" \
+            --resolve-s3 \
+            --capabilities CAPABILITY_IAM \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides \
+              AdminPassword="${{ secrets.ADMIN_PASSWORD }}" \
+              SecretKey="${{ secrets.SECRET_KEY }}"
+
+      - name: Ler outputs do CloudFormation
+        run: |
+          aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$AWS_REGION" > stack.json
+          python - <<'PYCODE'
+          import json
+          import os
+
+          with open('stack.json', encoding='utf-8') as f:
+              data = json.load(f)
+
+          outputs = {o['OutputKey']: o['OutputValue'] for o in data['Stacks'][0].get('Outputs', [])}
+
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as env:
+              env.write(f"API_URL={outputs['ApiUrl']}\n")
+              env.write(f"SITE_BUCKET={outputs['SiteBucketName']}\n")
+              env.write(f"SITE_URL={outputs['SiteUrl']}\n")
+              env.write(f"CLOUDFRONT_DISTRIBUTION_ID={outputs['CloudFrontDistributionId']}\n")
+          PYCODE
+
+      - name: Gerar configuracao do frontend
+        run: |
+          cat > frontend/config.js <<EOF
+          window.APP_CONFIG = {
+            API_BASE_URL: "$API_URL"
+          };
+          EOF
+
+      - name: Publicar frontend no S3
+        run: |
+          aws s3 sync frontend/ "s3://$SITE_BUCKET" --delete --exclude "config.example.js"
+
+      - name: Limpar cache do CloudFront
+        run: |
+          aws cloudfront create-invalidation --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" --paths "/*"
+
+      - name: Mostrar URL do site
+        run: |
+          echo "Site publicado em: $SITE_URL"

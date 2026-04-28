@@ -1,0 +1,168 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Site serverless para torneio de sinuca com Lambda, DynamoDB, S3 e CloudFront.
+
+Parameters:
+  AdminPassword:
+    Type: String
+    NoEcho: true
+    Description: Senha do painel administrativo.
+  SecretKey:
+    Type: String
+    NoEcho: true
+    Description: Chave secreta para assinar sessão do admin.
+
+Resources:
+  TournamentTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        - Key: Project
+          Value: TorneioSinuca
+
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: backend/
+      Handler: app.lambda_handler
+      Runtime: python3.12
+      Architectures:
+        - x86_64
+      MemorySize: 256
+      Timeout: 20
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref TournamentTable
+          ADMIN_PASSWORD: !Ref AdminPassword
+          SECRET_KEY: !Ref SecretKey
+          TRAVEL_BUFFER_MINUTES: '30'
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TournamentTable
+      FunctionUrlConfig:
+        AuthType: NONE
+        Cors:
+          AllowOrigins:
+            - '*'
+          AllowHeaders:
+            - content-type
+            - authorization
+          AllowMethods:
+            - GET
+            - POST
+            - PUT
+            - DELETE
+            - OPTIONS
+          MaxAge: 600
+      Tags:
+        Project: TorneioSinuca
+
+  SiteBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Project
+          Value: TorneioSinuca
+
+  SiteOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub '${AWS::StackName}-site-oac'
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  SiteDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        DefaultRootObject: index.html
+        PriceClass: PriceClass_100
+        Origins:
+          - Id: SiteBucketOrigin
+            DomainName: !GetAtt SiteBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt SiteOriginAccessControl.Id
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+        DefaultCacheBehavior:
+          TargetOriginId: SiteBucketOrigin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          CachedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          Compress: true
+          ForwardedValues:
+            QueryString: false
+            Cookies:
+              Forward: none
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+      Tags:
+        - Key: Project
+          Value: TorneioSinuca
+
+  SiteBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref SiteBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudFrontRead
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub '${SiteBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${SiteDistribution}'
+
+Outputs:
+  ApiUrl:
+    Description: URL publica da Lambda Function URL.
+    Value: !GetAtt ApiFunctionUrl.FunctionUrl
+  SiteBucketName:
+    Description: Bucket S3 do frontend estatico.
+    Value: !Ref SiteBucket
+  SiteUrl:
+    Description: URL HTTPS do site no CloudFront.
+    Value: !Sub 'https://${SiteDistribution.DomainName}'
+  CloudFrontDistributionId:
+    Description: ID da distribuicao CloudFront.
+    Value: !Ref SiteDistribution
+  TableName:
+    Description: Tabela DynamoDB do torneio.
+    Value: !Ref TournamentTable

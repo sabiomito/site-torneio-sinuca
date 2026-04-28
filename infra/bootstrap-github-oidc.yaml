@@ -1,0 +1,71 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Cria role IAM para GitHub Actions fazer deploy do site de torneio de sinuca via OIDC.
+
+Parameters:
+  GitHubOrg:
+    Type: String
+    Description: Usuario ou organizacao do GitHub. Exemplo christianwillian
+  GitHubRepo:
+    Type: String
+    Description: Nome do repositorio. Exemplo site-torneio-sinuca
+  Branch:
+    Type: String
+    Default: main
+    Description: Branch autorizada para fazer deploy.
+
+Resources:
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      ThumbprintList:
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+
+  GitHubDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'torneio-sinuca-github-deploy-${GitHubRepo}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref GitHubOidcProvider
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub: !Sub 'repo:${GitHubOrg}/${GitHubRepo}:ref:refs/heads/${Branch}'
+      Policies:
+        - PolicyName: TorneioSinucaDeployPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudformation:*
+                  - s3:*
+                  - lambda:*
+                  - dynamodb:*
+                  - cloudfront:*
+                  - logs:*
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:GetRole
+                  - iam:PassRole
+                  - iam:PutRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:GetRolePolicy
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:TagRole
+                  - iam:UntagRole
+                Resource: '*'
+
+Outputs:
+  RoleArn:
+    Description: Cole este ARN na variavel AWS_ROLE_ARN do GitHub.
+    Value: !GetAtt GitHubDeployRole.Arn

@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Admin - Torneio de Sinuca</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>Administração</h1>
+      <p>Cadastre torneio, competidores, locais, datas e resultados</p>
+    </div>
+    <nav>
+      <a href="index.html">Início</a>
+      <button id="logout" class="link-button hidden">Sair</button>
+    </nav>
+  </header>
+
+  <main class="container">
+    <section class="card" id="login-card">
+      <h2>Entrar no admin</h2>
+      <form id="login-form" class="inline-form">
+        <label>Senha
+          <input type="password" id="admin-password" autocomplete="current-password" required>
+        </label>
+        <button type="submit">Entrar</button>
+      </form>
+      <p class="muted" id="login-message"></p>
+    </section>
+
+    <div id="admin-panel" class="hidden">
+      <section class="card collapsible" data-section="setup">
+        <button class="collapse-title" type="button"><span>▾</span> Criar / recriar torneio completo</button>
+        <div class="collapse-body">
+          <p class="muted">Essa opção zera jogadores, locais, datas e partidas. Use para começar um torneio novo.</p>
+          <form id="setup-form">
+            <div class="grid-3">
+              <label>Quantidade de divisões
+                <input type="number" id="setup-division-count" min="1" value="2">
+              </label>
+              <label>Tempo estimado por partida, em minutos
+                <input type="number" id="setup-duration" min="5" step="5" value="30">
+              </label>
+              <div class="actions-end">
+                <button type="button" id="build-setup-fields" class="secondary">Montar campos</button>
+              </div>
+            </div>
+            <div id="rules-fields" class="rule-grid"></div>
+            <div class="grid-2">
+              <label>Locais de jogo, um por linha
+                <textarea id="setup-places" rows="4" placeholder="Mesa 1&#10;Mesa 2"></textarea>
+              </label>
+              <label>Datas e horário inicial
+                <textarea id="setup-dates" rows="4" placeholder="2026-05-10 09:00&#10;2026-05-11 14:00"></textarea>
+                <small>Se não informar horário, será usado 09:00.</small>
+              </label>
+            </div>
+            <div id="players-fields"></div>
+            <button type="submit">Criar torneio e calcular jogos</button>
+          </form>
+        </div>
+      </section>
+
+      <section class="card collapsible" data-section="config">
+        <button class="collapse-title" type="button"><span>▾</span> Configurações atuais</button>
+        <div class="collapse-body">
+          <form id="config-form">
+            <div class="grid-3">
+              <label>Quantidade de divisões
+                <input type="number" id="division-count" min="1">
+              </label>
+              <label>Tempo estimado por partida, em minutos
+                <input type="number" id="duration-minutes" min="5" step="5">
+              </label>
+              <div class="actions-end">
+                <button type="button" id="build-rules" class="secondary">Atualizar campos</button>
+              </div>
+            </div>
+            <div id="current-rules-fields" class="rule-grid"></div>
+            <button type="submit">Salvar configurações</button>
+          </form>
+        </div>
+      </section>
+
+      <section class="card collapsible" data-section="players">
+        <button class="collapse-title" type="button"><span>▾</span> Competidores</button>
+        <div class="collapse-body">
+          <form id="player-form" class="inline-form">
+            <label>Nome
+              <input type="text" id="player-name" required>
+            </label>
+            <label>Divisão
+              <select id="player-division"></select>
+            </label>
+            <button type="submit">Adicionar competidor</button>
+          </form>
+          <div id="players-list"></div>
+        </div>
+      </section>
+
+      <section class="card collapsible" data-section="places">
+        <button class="collapse-title" type="button"><span>▾</span> Locais</button>
+        <div class="collapse-body">
+          <form id="place-form" class="inline-form">
+            <label>Novo local
+              <input type="text" id="place-name" required>
+            </label>
+            <button type="submit">Adicionar local</button>
+          </form>
+          <div id="places-list"></div>
+        </div>
+      </section>
+
+      <section class="card collapsible" data-section="dates">
+        <button class="collapse-title" type="button"><span>▾</span> Datas e horários iniciais</button>
+        <div class="collapse-body">
+          <form id="date-form" class="inline-form">
+            <label>Data
+              <input type="date" id="date-value" required>
+            </label>
+            <label>Horário inicial
+              <input type="time" id="date-start-time" value="09:00">
+            </label>
+            <button type="submit">Adicionar data</button>
+          </form>
+          <div id="dates-list"></div>
+        </div>
+      </section>
+
+      <section class="card collapsible" data-section="recalculate">
+        <button class="collapse-title" type="button"><span>▾</span> Recalcular calendário</button>
+        <div class="collapse-body">
+          <p>Use depois de adicionar competidor, local, data ou mudar tempo da partida. Resultados já lançados são preservados quando o confronto continua existindo.</p>
+          <button id="recalculate">Recalcular torneio</button>
+        </div>
+      </section>
+
+      <section class="card collapsible" data-section="matches">
+        <button class="collapse-title" type="button"><span>▾</span> Partidas e resultados</button>
+        <div class="collapse-body">
+          <div class="filters grid-4 sticky-filters">
+            <label>Data
+              <select id="admin-filter-date"><option value="">Todas</option></select>
+            </label>
+            <label>Local
+              <select id="admin-filter-place"><option value="">Todos</option></select>
+            </label>
+            <label>Competidor
+              <select id="admin-filter-player"><option value="">Todos</option></select>
+            </label>
+            <label>Divisão
+              <select id="admin-filter-division"><option value="">Todas</option></select>
+            </label>
+          </div>
+          <button class="secondary" id="admin-clear-filters">Limpar filtros</button>
+          <div id="admin-matches"></div>
+        </div>
+      </section>
+    </div>
+
+    <div id="toast" class="toast hidden"></div>
+  </main>
+  <script src="config.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/admin.js"></script>
+</body>
+</html>
