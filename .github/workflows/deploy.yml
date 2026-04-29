@@ -38,7 +38,16 @@ jobs:
         run: sam build --template-file template.yaml
 
       - name: Deploy infraestrutura e backend
+        env:
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          SECRET_KEY: ${{ secrets.SECRET_KEY }}
         run: |
+          if [ -z "$ADMIN_PASSWORD" ] || [ -z "$SECRET_KEY" ]; then
+            echo "::error::Configure ADMIN_PASSWORD e SECRET_KEY em Settings > Secrets and variables > Actions > Secrets."
+            exit 1
+          fi
+
+          set +e
           sam deploy \
             --stack-name "$STACK_NAME" \
             --resolve-s3 \
@@ -46,8 +55,19 @@ jobs:
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
             --parameter-overrides \
-              AdminPassword="${{ secrets.ADMIN_PASSWORD }}" \
-              SecretKey="${{ secrets.SECRET_KEY }}"
+              "ParameterKey=AdminPassword,ParameterValue=${ADMIN_PASSWORD}" \
+              "ParameterKey=SecretKey,ParameterValue=${SECRET_KEY}"
+          STATUS=$?
+
+          if [ $STATUS -ne 0 ]; then
+            echo "::group::Ultimos eventos da stack"
+            aws cloudformation describe-stack-events \
+              --stack-name "$STACK_NAME" \
+              --region "$AWS_REGION" \
+              --max-items 20 || true
+            echo "::endgroup::"
+            exit $STATUS
+          fi
 
       - name: Ler outputs do CloudFormation
         run: |
@@ -70,11 +90,11 @@ jobs:
 
       - name: Gerar configuracao do frontend
         run: |
-          cat > frontend/config.js <<EOF
+          cat > frontend/config.js <<EOF2
           window.APP_CONFIG = {
             API_BASE_URL: "$API_URL"
           };
-          EOF
+          EOF2
 
       - name: Publicar frontend no S3
         run: |
