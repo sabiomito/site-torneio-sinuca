@@ -42,7 +42,7 @@ a:hover { text-decoration: underline; }
 
 .topbar h1 { margin: 0 0 4px; font-size: 20px; }
 .topbar p { margin: 0; color: var(--muted); }
-.brand { color: var(--text); font-weight: 800; letter-spacing: 0.2px; }
+.brand { color: var(--text); font-weight: 800; letter-spacing: 0.2px; max-width: min(680px, 70vw); line-height: 1.2; }
 .topbar nav { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
 .topbar nav a, .link-button {
   color: var(--accent);
@@ -232,6 +232,19 @@ tr.relegation td:first-child, .rank-relegation td:first-child { border-left: 4px
 .collapsible.closed .collapse-title span { transform: rotate(-90deg); }
 .collapse-body { padding: 22px; }
 .collapsible.closed .collapse-body { display: none; }
+
+
+
+.schedule-rules {
+  background: rgba(0,0,0,.16);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 16px 18px;
+  margin: 12px 0 16px;
+}
+.schedule-rules h3 { margin-bottom: 10px; }
+.schedule-rules ul { margin: 0; padding-left: 20px; color: var(--muted); }
+.schedule-rules li { margin: 7px 0; }
 
 .rule-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin: 12px 0; }
 .rule-card, .rule-box, .division-create-card {

@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import json
 import os
+import random
 import time
 import uuid
 from datetime import datetime, timedelta
@@ -373,12 +374,28 @@ def travel_penalty(player_id, date, place_id, player_schedule):
     return penalty
 
 
-def slot_candidates(dates, places, duration_minutes, scheduled_count):
-    # A cada rodada, abre uma quantidade grande de horários. Se o torneio crescer,
-    # o algoritmo aumenta o limite automaticamente.
-    matches_per_round = max(1, len(places))
-    extra_slots = max(24, scheduled_count + 50)
-    max_slots_per_place_day = max(24, (extra_slots // matches_per_round) + 10)
+def distribute_integer_targets(total, keys, rng=None):
+    """Distribui um total inteiro entre chaves com diferença máxima de 1."""
+    keys = list(keys)
+    if not keys:
+        return {}
+    ordered_keys = keys[:]
+    if rng:
+        rng.shuffle(ordered_keys)
+    base = total // len(ordered_keys)
+    extra = total % len(ordered_keys)
+    targets = {key: base for key in ordered_keys}
+    for key in ordered_keys[:extra]:
+        targets[key] += 1
+    return targets
+
+
+def slot_candidates(dates, places, duration_minutes, total_matches):
+    # Gera horários por combinação data/local. O número de horários por local/dia
+    # é maior que a meta média para permitir ajustes por conflito de jogadores.
+    day_place_count = max(1, len(dates) * len(places))
+    average_slots = (total_matches // day_place_count) + 1
+    max_slots_per_place_day = max(24, average_slots + len(places) + 12)
     candidates = []
     for date_item in dates:
         date = date_item["date"]
@@ -401,7 +418,6 @@ def slot_candidates(dates, places, duration_minutes, scheduled_count):
                 })
     return candidates
 
-
 def generate_schedule():
     config = get_config()
     duration = config["duration_minutes"]
@@ -417,6 +433,12 @@ def generate_schedule():
         upsert_date({"date": today, "start_time": "09:00"})
         dates = get_dates()
 
+    seed = time.time_ns()
+    rng = random.Random(seed)
+    config["last_schedule_seed"] = seed
+    config["last_schedule_at"] = now_iso()
+    put_item(config)
+
     existing_matches = get_matches()
     previous_by_pair = {str(m.get("pair_key")): m for m in existing_matches if m.get("pair_key")}
     current_pair_keys = set()
@@ -424,7 +446,9 @@ def generate_schedule():
     pairs = []
     for division in range(1, config["division_count"] + 1):
         division_players = [p for p in players if normalize_int(p.get("division"), 1) == division]
-        division_players.sort(key=lambda p: str(p.get("name", "")).lower())
+        # O sorteio começa embaralhando os jogadores da divisão. A seed usa timestamp,
+        # então cada recalculo tende a criar uma ordem diferente de confrontos.
+        rng.shuffle(division_players)
         for p1, p2 in combinations(division_players, 2):
             pair_key = build_pair_key(division, p1["player_id"], p2["player_id"])
             current_pair_keys.add(pair_key)
@@ -437,44 +461,135 @@ def generate_schedule():
                 "pair_key": pair_key,
             })
 
+    rng.shuffle(pairs)
+
     # Remove jogos que deixaram de existir por mudança de competidor/divisão.
     for old_match in existing_matches:
         if old_match.get("pair_key") not in current_pair_keys:
             delete_item(old_match["pk"], old_match["sk"])
 
+    if not pairs:
+        return {
+            "created": 0,
+            "unscheduled": 0,
+            "seed": seed,
+            "message": "Não há confrontos suficientes. Cada divisão precisa ter pelo menos 2 jogadores.",
+        }
+
+    date_keys = [d["date"] for d in dates]
+    day_place_keys = [(d["date"], p["place_id"]) for d in dates for p in places]
+    target_by_day_place = distribute_integer_targets(len(pairs), day_place_keys, rng)
+    target_by_date = distribute_integer_targets(len(pairs), date_keys, rng)
+
+    player_total_games = {}
+    for pair in pairs:
+        player_total_games[pair["player1_id"]] = player_total_games.get(pair["player1_id"], 0) + 1
+        player_total_games[pair["player2_id"]] = player_total_games.get(pair["player2_id"], 0) + 1
+
+    target_by_player_date = {
+        player_id: distribute_integer_targets(total, date_keys, rng)
+        for player_id, total in player_total_games.items()
+    }
+
+    candidates = slot_candidates(dates, places, duration, len(pairs))
+    candidates.sort(key=lambda c: (c["start"], c["date"], c["place_name"]))
+
     player_schedule = {}
     occupied_slots = set()
+    date_place_load = {key: 0 for key in day_place_keys}
+    date_load = {date: 0 for date in date_keys}
+    player_date_load = {pid: {date: 0 for date in date_keys} for pid in player_total_games}
     scheduled_items = []
     unscheduled = []
 
-    # Prioriza jogos ainda sem resultado para facilitar preservar os concluídos.
-    pairs.sort(key=lambda x: (x["division"], x["player1_name"].lower(), x["player2_name"].lower()))
+    def player_day_load(player_id, date):
+        return player_date_load.setdefault(player_id, {d: 0 for d in date_keys}).get(date, 0)
+
+    def score_candidate(pair, candidate):
+        day_place_key = (candidate["date"], candidate["place_id"])
+        dp_after = date_place_load.get(day_place_key, 0) + 1
+        dp_target = target_by_day_place.get(day_place_key, 0)
+        dp_overflow = max(0, dp_after - dp_target)
+
+        date_after = date_load.get(candidate["date"], 0) + 1
+        date_target = target_by_date.get(candidate["date"], 0)
+        date_overflow = max(0, date_after - date_target)
+
+        p1 = pair["player1_id"]
+        p2 = pair["player2_id"]
+        p1_current = player_day_load(p1, candidate["date"])
+        p2_current = player_day_load(p2, candidate["date"])
+        p1_after = p1_current + 1
+        p2_after = p2_current + 1
+        p1_target = target_by_player_date.get(p1, {}).get(candidate["date"], 0)
+        p2_target = target_by_player_date.get(p2, {}).get(candidate["date"], 0)
+        player_overflow = max(0, p1_after - p1_target) + max(0, p2_after - p2_target)
+
+        p1_min = min(player_date_load.get(p1, {}).get(d, 0) for d in date_keys)
+        p2_min = min(player_date_load.get(p2, {}).get(d, 0) for d in date_keys)
+        player_balance = (p1_after - p1_min) + (p2_after - p2_min)
+
+        # Troca de local no mesmo dia é permitida apenas quando não há opção melhor.
+        # A regra de tempo mínimo para deslocamento é garantida por player_available().
+        travel = travel_penalty(p1, candidate["date"], candidate["place_id"], player_schedule)
+        travel += travel_penalty(p2, candidate["date"], candidate["place_id"], player_schedule)
+
+        return (
+            dp_overflow,                  # tenta manter data/local dentro da meta
+            player_overflow,              # tenta dividir jogos de cada jogador entre os dias
+            travel,                       # evita deslocamento de local no mesmo dia
+            date_overflow,                # evita concentrar tudo em um dia
+            player_balance,               # prefere o dia em que os jogadores jogaram menos
+            date_place_load.get(day_place_key, 0),
+            date_load.get(candidate["date"], 0),
+            p1_current + p2_current,
+            candidate["start"],
+            candidate["date"],
+            candidate["place_name"],
+            rng.random(),                 # desempate aleatório
+        )
 
     for pair in pairs:
         previous = previous_by_pair.get(pair["pair_key"])
         best = None
-        candidates = slot_candidates(dates, places, duration, len(scheduled_items))
         for candidate in candidates:
             slot_key = (candidate["date"], candidate["time"], candidate["place_id"])
             if slot_key in occupied_slots:
                 continue
-            p1_ok = player_available(pair["player1_id"], candidate["date"], candidate["start"], candidate["end"], candidate["place_id"], player_schedule)
-            p2_ok = player_available(pair["player2_id"], candidate["date"], candidate["start"], candidate["end"], candidate["place_id"], player_schedule)
+
+            p1_ok = player_available(
+                pair["player1_id"],
+                candidate["date"],
+                candidate["start"],
+                candidate["end"],
+                candidate["place_id"],
+                player_schedule,
+            )
+            p2_ok = player_available(
+                pair["player2_id"],
+                candidate["date"],
+                candidate["start"],
+                candidate["end"],
+                candidate["place_id"],
+                player_schedule,
+            )
             if not (p1_ok and p2_ok):
                 continue
-            penalty = travel_penalty(pair["player1_id"], candidate["date"], candidate["place_id"], player_schedule)
-            penalty += travel_penalty(pair["player2_id"], candidate["date"], candidate["place_id"], player_schedule)
-            candidate_score = (penalty, candidate["date"], candidate["start"], candidate["place_name"])
+
+            candidate_score = score_candidate(pair, candidate)
             if not best or candidate_score < best[0]:
                 best = (candidate_score, candidate)
-                if penalty == 0:
-                    break
+
         if not best:
             unscheduled.append(pair)
             continue
 
         candidate = best[1]
+        day_place_key = (candidate["date"], candidate["place_id"])
         occupied_slots.add((candidate["date"], candidate["time"], candidate["place_id"]))
+        date_place_load[day_place_key] = date_place_load.get(day_place_key, 0) + 1
+        date_load[candidate["date"]] = date_load.get(candidate["date"], 0) + 1
+
         for pid in [pair["player1_id"], pair["player2_id"]]:
             player_schedule.setdefault(pid, []).append({
                 "date": candidate["date"],
@@ -482,6 +597,8 @@ def generate_schedule():
                 "end": candidate["end"],
                 "place_id": candidate["place_id"],
             })
+            player_date_load.setdefault(pid, {d: 0 for d in date_keys})
+            player_date_load[pid][candidate["date"]] = player_date_load[pid].get(candidate["date"], 0) + 1
 
         match_id = previous.get("match_id") if previous else make_id("match")
         item = {
@@ -531,9 +648,9 @@ def generate_schedule():
     return {
         "created": len(scheduled_items),
         "unscheduled": len(unscheduled),
-        "message": "Calendário recalculado.",
+        "seed": seed,
+        "message": "Calendário recalculado com divisão equilibrada por data/local e por jogador.",
     }
-
 
 def calculate_standings(players, matches, config):
     table = {}

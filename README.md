@@ -28,6 +28,9 @@ Depois da configuração inicial, qualquer alteração feita por commit na branc
 - Tempo estimado por partida, padrão 30 minutos.
 - Recalcular calendário sem precisar recriar tudo.
 - Todos contra todos dentro de cada divisão.
+- Sorteio aleatório dos confrontos a cada recalculo, usando seed baseada no timestamp.
+- Distribuição equilibrada das partidas entre datas e locais cadastrados.
+- Distribuição equilibrada das partidas de cada jogador entre os dias do torneio, dentro do possível.
 - Evita jogador em dois jogos ao mesmo tempo.
 - Evita deslocamento entre locais no mesmo dia, exceto se houver pelo menos 30 minutos depois do fim da partida anterior.
 - Vitória vale 3 pontos.
