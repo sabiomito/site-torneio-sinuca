@@ -48,7 +48,7 @@ def response(status, data=None, headers=None):
     base_headers = {
         "Content-Type": "application/json; charset=utf-8",
         "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "content-type,authorization",
+        "Access-Control-Allow-Headers": "content-type,authorization,x-admin-token",
         "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
     }
     if headers:
@@ -75,8 +75,14 @@ def get_method_path(event):
     http = request_context.get("http", {})
     method = http.get("method") or event.get("httpMethod", "GET")
     path = event.get("rawPath") or event.get("path") or "/"
+    if path == "/api" or path.startswith("/api/"):
+        path = path[4:] or "/"
     path = path.rstrip("/") or "/"
     return method.upper(), path
+
+
+def get_query_params(event):
+    return event.get("queryStringParameters") or {}
 
 
 def b64url(data: bytes) -> str:
@@ -119,6 +125,18 @@ def require_admin(event):
     authorization = headers.get("authorization") or headers.get("Authorization") or ""
     if authorization.lower().startswith("bearer "):
         return verify_token(authorization.split(" ", 1)[1].strip())
+
+    token = str(get_query_params(event).get("token") or "").strip()
+    if token:
+        return verify_token(token)
+
+    try:
+        body = parse_body(event)
+        token = str(body.get("token") or "").strip()
+        if token:
+            return verify_token(token)
+    except Exception:
+        pass
     return False
 
 

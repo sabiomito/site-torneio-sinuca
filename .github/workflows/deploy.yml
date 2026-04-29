@@ -92,7 +92,7 @@ jobs:
         run: |
           cat > frontend/config.js <<EOF2
           window.APP_CONFIG = {
-            API_BASE_URL: "$API_URL"
+            API_BASE_URL: "/api"
           };
           EOF2
 

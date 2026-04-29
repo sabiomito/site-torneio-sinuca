@@ -6,6 +6,7 @@ Esta versão troca Flask + SQLite por uma arquitetura serverless:
 - **API Python** em `backend/app.py`, rodando em AWS Lambda.
 - **Banco DynamoDB** com cobrança sob demanda.
 - **S3 privado + CloudFront HTTPS** para publicar o site.
+- **API também pelo CloudFront em /api** para evitar erro de CORS/preflight no admin.
 - **Infraestrutura como código** em `template.yaml` com AWS SAM/CloudFormation.
 - **Deploy automático pelo GitHub Actions** em `.github/workflows/deploy.yml`.
 
@@ -145,7 +146,7 @@ Crie estas **Variables**:
 ```text
 AWS_ROLE_ARN = valor RoleArn copiado do CloudFormation
 AWS_REGION   = sa-east-1
-STACK_NAME   = site-torneio-sinuca
+STACK_NAME   = torneioSinucaApp
 ```
 
 Crie estes **Secrets**:
@@ -178,8 +179,8 @@ O workflow vai:
 1. Fazer build com AWS SAM.
 2. Criar/atualizar CloudFormation.
 3. Criar Lambda, DynamoDB, S3 e CloudFront.
-4. Pegar a URL da Lambda.
-5. Gerar `frontend/config.js` automaticamente.
+4. Pegar os outputs da stack.
+5. Gerar `frontend/config.js` automaticamente apontando a API para `/api`.
 6. Subir o frontend para o S3.
 7. Limpar o cache do CloudFront.
 8. Mostrar a URL final do site.
@@ -261,3 +262,51 @@ Mesmo sendo uma arquitetura de custo muito baixo para pouco acesso, monitore o *
 - Estilo visual: `frontend/css/style.css`
 - Infraestrutura AWS: `template.yaml`
 - Deploy automático: `.github/workflows/deploy.yml`
+
+---
+
+# Correções importantes desta versão
+
+## Aparência
+
+O CSS voltou para o visual escuro da versão Flask original, com fundo escuro, cards arredondados, destaque verde, hero no placar e painel administrativo com a mesma identidade visual.
+
+## Admin com `Failed to fetch`
+
+Esta versão evita que o navegador chame a Lambda diretamente por outro domínio. Agora o CloudFront encaminha qualquer chamada iniciada por `/api` para a Lambda Function URL. Assim, o frontend chama a API no mesmo domínio do site:
+
+```text
+https://seu-cloudfront.cloudfront.net/api/...
+```
+
+O `frontend/config.js` do deploy fica assim:
+
+```js
+window.APP_CONFIG = {
+  API_BASE_URL: "/api"
+};
+```
+
+Também foi mantido suporte para chamar a Lambda diretamente, mas o caminho recomendado é via `/api`.
+
+## Rotas amigáveis
+
+Foi adicionada uma CloudFront Function para permitir acesso direto a:
+
+```text
+/admin
+/player?id=...
+```
+
+Ela reescreve internamente para `admin.html` e `player.html`.
+
+## Nome da stack
+
+Mantenha stacks separadas:
+
+```text
+Bootstrap/OIDC: torneioSinucaBootstrap
+Aplicação:      torneioSinucaApp
+```
+
+Não use a mesma stack para bootstrap e aplicação.

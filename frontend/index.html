@@ -3,30 +3,49 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Torneio de Sinuca</title>
-  <link rel="stylesheet" href="css/style.css">
+  <title>Placar - Torneio de Sinuca</title>
+  <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
   <header class="topbar">
-    <div>
-      <h1>Torneio de Sinuca</h1>
-      <p>Placar, classificação e calendário dos jogos</p>
-    </div>
+    <a class="brand" href="/index.html">🎱 Torneio de Sinuca</a>
     <nav>
-      <a href="index.html">Início</a>
-      <a href="admin.html">Admin</a>
+      <a href="/index.html">Placar</a>
+      <a href="/admin">Admin</a>
     </nav>
   </header>
 
   <main class="container">
+    <section class="hero">
+      <div>
+        <p class="eyebrow">Torneio de sinuca</p>
+        <h1>Placar geral</h1>
+        <p>Acompanhe a classificação, promoções, rebaixamentos e a agenda completa de partidas.</p>
+      </div>
+      <a class="button" href="/admin">Atualizar pelo admin</a>
+    </section>
+
+    <section class="card legend-card">
+      <div class="section-title">
+        <h2>Legenda</h2>
+        <span>Critérios automáticos</span>
+      </div>
+      <div class="legend-row">
+        <span class="legend-chip promotion">Promoção</span>
+        <span class="muted">linha verde: sobe para a divisão acima</span>
+        <span class="legend-chip relegation">Rebaixamento</span>
+        <span class="muted">linha vermelha: cai para a divisão abaixo</span>
+      </div>
+    </section>
+
+    <section id="standings"></section>
+
     <section class="card">
       <div class="section-title">
-        <div>
-          <h2>Filtros</h2>
-          <p>Filtre a lista de partidas por data, local ou competidor.</p>
-        </div>
+        <h2>Filtrar jogos</h2>
+        <span>por data, local, competidor e/ou divisão</span>
       </div>
-      <div class="filters grid-4">
+      <div class="filters grid-4 public-filter-form">
         <label>Data
           <select id="filter-date"><option value="">Todas</option></select>
         </label>
@@ -40,24 +59,24 @@
           <select id="filter-division"><option value="">Todas</option></select>
         </label>
       </div>
-      <button class="secondary" id="clear-filters">Limpar filtros</button>
+      <button class="secondary" id="clear-filters" type="button">Limpar filtros</button>
     </section>
-
-    <section id="standings"></section>
 
     <section class="card">
       <div class="section-title">
-        <div>
-          <h2>Jogos</h2>
-          <p>Separados por data e local.</p>
-        </div>
+        <h2>Jogos por data e local</h2>
+        <span id="matches-count"></span>
       </div>
       <div id="matches"></div>
     </section>
   </main>
 
-  <script src="config.js"></script>
-  <script src="js/api.js"></script>
-  <script src="js/public.js"></script>
+  <footer class="footer">
+    <span>Placar por pontos: vitória = 3 pontos. Desempate: saldo de bolas mortas.</span>
+  </footer>
+
+  <script src="/config.js"></script>
+  <script src="/js/api.js"></script>
+  <script src="/js/public.js"></script>
 </body>
 </html>

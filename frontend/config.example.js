@@ -1,3 +1,5 @@
 window.APP_CONFIG = {
-  API_BASE_URL: "https://COLE_AQUI_A_URL_DA_LAMBDA_FUNCTION_URL"
+  // No deploy pela AWS use /api. Para testar localmente com uma Lambda Function URL direta,
+  // troque para algo como: https://xxxx.lambda-url.sa-east-1.on.aws
+  API_BASE_URL: "/api"
 };

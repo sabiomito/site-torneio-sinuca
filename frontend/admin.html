@@ -4,26 +4,24 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Admin - Torneio de Sinuca</title>
-  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
   <header class="topbar">
-    <div>
-      <h1>Administração</h1>
-      <p>Cadastre torneio, competidores, locais, datas e resultados</p>
-    </div>
+    <a class="brand" href="/index.html">🎱 Torneio de Sinuca</a>
     <nav>
-      <a href="index.html">Início</a>
+      <a href="/index.html">Placar</a>
       <button id="logout" class="link-button hidden">Sair</button>
     </nav>
   </header>
 
   <main class="container">
-    <section class="card" id="login-card">
-      <h2>Entrar no admin</h2>
-      <form id="login-form" class="inline-form">
+    <section class="login-card card" id="login-card">
+      <h1>Área administrativa</h1>
+      <p class="muted">Informe a senha para criar torneios, editar agenda e lançar resultados.</p>
+      <form id="login-form" class="stack-form">
         <label>Senha
-          <input type="password" id="admin-password" autocomplete="current-password" required>
+          <input type="password" id="admin-password" autocomplete="current-password" required autofocus>
         </label>
         <button type="submit">Entrar</button>
       </form>
@@ -31,11 +29,19 @@
     </section>
 
     <div id="admin-panel" class="hidden">
+      <section class="hero compact">
+        <div>
+          <p class="eyebrow">Administração</p>
+          <h1>Painel do torneio</h1>
+          <p>Cadastre competidores, locais, datas, recalcule calendário e lance os resultados.</p>
+        </div>
+      </section>
+
       <section class="card collapsible" data-section="setup">
         <button class="collapse-title" type="button"><span>▾</span> Criar / recriar torneio completo</button>
         <div class="collapse-body">
           <p class="muted">Essa opção zera jogadores, locais, datas e partidas. Use para começar um torneio novo.</p>
-          <form id="setup-form">
+          <form id="setup-form" class="stack-form">
             <div class="grid-3">
               <label>Quantidade de divisões
                 <input type="number" id="setup-division-count" min="1" value="2">
@@ -66,7 +72,7 @@
       <section class="card collapsible" data-section="config">
         <button class="collapse-title" type="button"><span>▾</span> Configurações atuais</button>
         <div class="collapse-body">
-          <form id="config-form">
+          <form id="config-form" class="stack-form">
             <div class="grid-3">
               <label>Quantidade de divisões
                 <input type="number" id="division-count" min="1">
@@ -103,7 +109,7 @@
       <section class="card collapsible" data-section="places">
         <button class="collapse-title" type="button"><span>▾</span> Locais</button>
         <div class="collapse-body">
-          <form id="place-form" class="inline-form">
+          <form id="place-form" class="inline-form add-form">
             <label>Novo local
               <input type="text" id="place-name" required>
             </label>
@@ -116,7 +122,7 @@
       <section class="card collapsible" data-section="dates">
         <button class="collapse-title" type="button"><span>▾</span> Datas e horários iniciais</button>
         <div class="collapse-body">
-          <form id="date-form" class="inline-form">
+          <form id="date-form" class="inline-form date-add-form">
             <label>Data
               <input type="date" id="date-value" required>
             </label>
@@ -133,7 +139,7 @@
         <button class="collapse-title" type="button"><span>▾</span> Recalcular calendário</button>
         <div class="collapse-body">
           <p>Use depois de adicionar competidor, local, data ou mudar tempo da partida. Resultados já lançados são preservados quando o confronto continua existindo.</p>
-          <button id="recalculate">Recalcular torneio</button>
+          <button id="recalculate" type="button">Recalcular torneio</button>
         </div>
       </section>
 
@@ -154,7 +160,7 @@
               <select id="admin-filter-division"><option value="">Todas</option></select>
             </label>
           </div>
-          <button class="secondary" id="admin-clear-filters">Limpar filtros</button>
+          <button class="secondary" id="admin-clear-filters" type="button">Limpar filtros</button>
           <div id="admin-matches"></div>
         </div>
       </section>
@@ -162,8 +168,13 @@
 
     <div id="toast" class="toast hidden"></div>
   </main>
-  <script src="config.js"></script>
-  <script src="js/api.js"></script>
-  <script src="js/admin.js"></script>
+
+  <footer class="footer">
+    <span>Placar por pontos: vitória = 3 pontos. Desempate: saldo de bolas mortas.</span>
+  </footer>
+
+  <script src="/config.js"></script>
+  <script src="/js/api.js"></script>
+  <script src="/js/admin.js"></script>
 </body>
 </html>

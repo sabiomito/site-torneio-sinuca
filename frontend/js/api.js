@@ -12,27 +12,49 @@ function clearToken() {
   localStorage.removeItem('sinuca_admin_token');
 }
 
-async function apiFetch(path, options = {}) {
+function apiUrl(path, isAdmin = false) {
   if (!API_BASE_URL) {
     throw new Error('API_BASE_URL não configurada. No deploy, o GitHub Actions cria o frontend/config.js automaticamente.');
   }
-  const headers = Object.assign({'Content-Type': 'application/json'}, options.headers || {});
-  if (options.admin) {
-    headers.Authorization = `Bearer ${getToken()}`;
+  const base = API_BASE_URL.startsWith('http') ? API_BASE_URL : `${location.origin}${API_BASE_URL}`;
+  const url = new URL(`${base}${path}`);
+  if (isAdmin) {
+    const token = getToken();
+    if (token) url.searchParams.set('token', token);
   }
-  const resp = await fetch(`${API_BASE_URL}${path}`, Object.assign({}, options, {headers}));
-  const text = await resp.text();
-  let data = {};
-  try { data = text ? JSON.parse(text) : {}; } catch (_) { data = {}; }
-  if (!resp.ok) {
-    throw new Error(data.error || `Erro ${resp.status}`);
+  return url.toString();
+}
+
+async function apiFetch(path, options = {}) {
+  const isAdmin = Boolean(options.admin);
+  const fetchOptions = Object.assign({}, options);
+  delete fetchOptions.admin;
+
+  // Não enviamos Content-Type e Authorization por padrão para evitar preflight/CORS
+  // quando o navegador acessa diretamente a Lambda Function URL.
+  fetchOptions.headers = Object.assign({}, options.headers || {});
+
+  try {
+    const resp = await fetch(apiUrl(path, isAdmin), fetchOptions);
+    const text = await resp.text();
+    let data = {};
+    try { data = text ? JSON.parse(text) : {}; } catch (_) { data = {}; }
+    if (!resp.ok) {
+      throw new Error(data.error || `Erro ${resp.status}`);
+    }
+    return data;
+  } catch (err) {
+    if (err instanceof TypeError && String(err.message).toLowerCase().includes('fetch')) {
+      throw new Error('Não consegui acessar a API. Verifique se o deploy terminou, se o config.js aponta para /api ou para a URL da Lambda, e se a distribuição do CloudFront já atualizou.');
+    }
+    throw err;
   }
-  return data;
 }
 
 function fmtDate(value) {
   if (!value) return 'Sem data';
   const [y, m, d] = value.split('-');
+  if (!y || !m || !d) return value;
   return `${d}/${m}/${y}`;
 }
 
@@ -103,19 +125,21 @@ function renderMatches(container, matches) {
     const dayMatches = byDate[date];
     const byPlace = groupBy(dayMatches, m => m.place_name || 'Sem local');
     const placesHtml = Object.keys(byPlace).sort().map(place => {
-      const cards = byPlace[place].sort((a,b) => String(a.time).localeCompare(String(b.time))).map(match => `
-        <div class="match-card">
-          <div><span class="badge">${escapeHtml(match.time || '--:--')}</span><div class="match-meta">até ${escapeHtml(match.end_time || '--:--')}</div></div>
-          <div>
-            <strong>${escapeHtml(match.player1_name)} x ${escapeHtml(match.player2_name)}</strong>
-            <div class="match-meta">${divisionName(match.division)} · ${escapeHtml(place)}</div>
+      const rows = byPlace[place].sort((a,b) => String(a.time).localeCompare(String(b.time))).map(match => `
+        <div class="match-row ${match.is_finished ? 'finished' : ''}">
+          <div class="match-main">
+            <span class="pill">${divisionName(match.division)}</span>
+            <span class="time">${escapeHtml(match.time || '--:--')}</span>
+            <strong>${escapeHtml(match.player1_name)}</strong>
+            <span class="versus">x</span>
+            <strong>${escapeHtml(match.player2_name)}</strong>
           </div>
-          <div>${matchResultText(match)}</div>
+          <div class="match-status">${matchResultText(match)}</div>
         </div>
       `).join('');
-      return `<div class="match-group"><h3>${escapeHtml(place)}</h3>${cards}</div>`;
+      return `<article class="match-group"><h3>${fmtDate(date)} · ${escapeHtml(place)}</h3><div class="matches-list">${rows}</div></article>`;
     }).join('');
-    return `<div class="match-group"><h2>${fmtDate(date)}</h2>${placesHtml}</div>`;
+    return placesHtml;
   }).join('');
-  container.innerHTML = html;
+  container.innerHTML = `<div class="match-groups">${html}</div>`;
 }

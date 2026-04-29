@@ -4,27 +4,42 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Jogador - Torneio de Sinuca</title>
-  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
   <header class="topbar">
-    <div>
-      <h1 id="player-title">Jogador</h1>
-      <p id="player-subtitle">Partidas do competidor</p>
-    </div>
+    <a class="brand" href="/index.html">🎱 Torneio de Sinuca</a>
     <nav>
-      <a href="index.html">Início</a>
-      <a href="admin.html">Admin</a>
+      <a href="/index.html">Placar</a>
+      <a href="/admin">Admin</a>
     </nav>
   </header>
+
   <main class="container">
+    <section class="hero compact">
+      <div>
+        <p class="eyebrow">Competidor</p>
+        <h1 id="player-title">Jogador</h1>
+        <p id="player-subtitle">Todas as partidas</p>
+      </div>
+      <a class="button secondary" href="/index.html">Voltar ao placar</a>
+    </section>
+
     <section class="card">
-      <h2>Partidas</h2>
+      <div class="section-title">
+        <h2>Partidas do jogador</h2>
+        <span>agenda e resultados</span>
+      </div>
       <div id="player-matches"></div>
     </section>
   </main>
-  <script src="config.js"></script>
-  <script src="js/api.js"></script>
-  <script src="js/player.js"></script>
+
+  <footer class="footer">
+    <span>Placar por pontos: vitória = 3 pontos. Desempate: saldo de bolas mortas.</span>
+  </footer>
+
+  <script src="/config.js"></script>
+  <script src="/js/api.js"></script>
+  <script src="/js/player.js"></script>
 </body>
 </html>

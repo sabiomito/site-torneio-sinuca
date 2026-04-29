@@ -60,10 +60,12 @@ Resources:
           AllowHeaders:
             - content-type
             - authorization
+            - x-admin-token
           AllowMethods:
             - GET
             - POST
             - PUT
+            - PATCH
             - DELETE
             - HEAD
           MaxAge: 600
@@ -91,6 +93,27 @@ Resources:
         SigningBehavior: always
         SigningProtocol: sigv4
 
+  UrlRewriteFunction:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: !Sub '${AWS::StackName}-url-rewrite'
+      AutoPublish: true
+      FunctionCode: |
+        function handler(event) {
+          var request = event.request;
+          if (request.uri === '/admin' || request.uri === '/admin/') {
+            request.uri = '/admin.html';
+          } else if (request.uri === '/player' || request.uri === '/player/') {
+            request.uri = '/player.html';
+          } else if (request.uri === '/') {
+            request.uri = '/index.html';
+          }
+          return request;
+        }
+      FunctionConfig:
+        Comment: Reescreve rotas amigaveis do site estatico.
+        Runtime: cloudfront-js-1.0
+
   SiteDistribution:
     Type: AWS::CloudFront::Distribution
     Properties:
@@ -104,6 +127,12 @@ Resources:
             OriginAccessControlId: !GetAtt SiteOriginAccessControl.Id
             S3OriginConfig:
               OriginAccessIdentity: ''
+          - Id: ApiFunctionUrlOrigin
+            DomainName: !Select [2, !Split ['/', !GetAtt ApiFunctionUrl.FunctionUrl]]
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols:
+                - TLSv1.2
         DefaultCacheBehavior:
           TargetOriginId: SiteBucketOrigin
           ViewerProtocolPolicy: redirect-to-https
@@ -120,6 +149,32 @@ Resources:
             QueryString: false
             Cookies:
               Forward: none
+          FunctionAssociations:
+            - EventType: viewer-request
+              FunctionARN: !GetAtt UrlRewriteFunction.FunctionARN
+        CacheBehaviors:
+          - PathPattern: api/*
+            TargetOriginId: ApiFunctionUrlOrigin
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods:
+              - GET
+              - HEAD
+              - OPTIONS
+              - PUT
+              - POST
+              - PATCH
+              - DELETE
+            CachedMethods:
+              - GET
+              - HEAD
+            Compress: true
+            ForwardedValues:
+              QueryString: true
+              Cookies:
+                Forward: none
+            MinTTL: 0
+            DefaultTTL: 0
+            MaxTTL: 0
         CustomErrorResponses:
           - ErrorCode: 403
             ResponseCode: 200
@@ -152,7 +207,7 @@ Resources:
 
 Outputs:
   ApiUrl:
-    Description: URL publica da Lambda Function URL.
+    Description: URL publica direta da Lambda Function URL.
     Value: !GetAtt ApiFunctionUrl.FunctionUrl
   SiteBucketName:
     Description: Bucket S3 do frontend estatico.
