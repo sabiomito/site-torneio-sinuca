@@ -138,7 +138,7 @@
       <section class="card collapsible" data-section="recalculate">
         <button class="collapse-title" type="button"><span>▾</span> Recalcular calendário</button>
         <div class="collapse-body">
-          <p>Use depois de adicionar competidor, local, data ou mudar tempo da partida. Resultados já lançados são preservados quando o confronto continua existindo.</p>
+          <p>Use depois de adicionar competidor, local, data ou mudar tempo da partida. Resultados já lançados são preservados quando o confronto continua existindo. Alterações manuais de data, horário e local das partidas serão descartadas no recalculo.</p>
           <div class="schedule-rules">
             <h3>Como o calendário é dividido</h3>
             <ul>
@@ -149,6 +149,7 @@
               <li>Nenhum jogador pode ser colocado em duas partidas no mesmo horário.</li>
               <li>O sistema evita que o jogador precise mudar de local no mesmo dia. Quando não houver alternativa melhor, ele só agenda a próxima partida em outro local se houver pelo menos 30 minutos após o fim da partida anterior.</li>
               <li>Os horários avançam pelo tempo estimado da partida. Exemplo: se a duração for 30 minutos e o início for 09:00, os horários serão 09:00, 09:30, 10:00 e assim por diante.</li>
+              <li>O admin pode alterar manualmente a data, o horário e o local de uma partida na seção Partidas e resultados; essa alteração manual não é fixa e será perdida se o calendário for recalculado.</li>
             </ul>
           </div>
           <button id="recalculate" type="button">Recalcular torneio</button>
@@ -173,6 +174,7 @@
             </label>
           </div>
           <button class="secondary" id="admin-clear-filters" type="button">Limpar filtros</button>
+          <p class="muted">Em cada partida você pode salvar resultado ou ajustar manualmente data, horário e local. O recalculo do calendário desfaz esses ajustes manuais.</p>
           <div id="admin-matches"></div>
         </div>
       </section>

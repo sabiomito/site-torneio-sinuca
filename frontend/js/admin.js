@@ -82,6 +82,26 @@ function collectRules(containerId) {
   return rules;
 }
 
+function buildDateOptions(selectedDate) {
+  const current = selectedDate || '';
+  let html = '<option value="">Selecione</option>';
+  adminState.dates.forEach(d => {
+    const value = d.date;
+    html += `<option value="${escapeHtml(value)}" ${value === current ? 'selected' : ''}>${fmtDate(value)}</option>`;
+  });
+  return html;
+}
+
+function buildPlaceOptions(selectedPlaceId) {
+  const current = selectedPlaceId || '';
+  let html = '<option value="">Selecione</option>';
+  adminState.places.forEach(p => {
+    const value = p.place_id;
+    html += `<option value="${escapeHtml(value)}" ${value === current ? 'selected' : ''}>${escapeHtml(p.name)}</option>`;
+  });
+  return html;
+}
+
 function buildSetupPlayerFields() {
   const count = Number(document.getElementById('setup-division-count').value || 2);
   buildRuleFields('rules-fields', count, {});
@@ -208,9 +228,27 @@ function renderAdminMatches() {
   container.innerHTML = matches.map(match => {
     const p1Win = match.winner_id === match.player1_id;
     const p2Win = match.winner_id === match.player2_id;
-    return `<form class="result-form" data-match-id="${escapeHtml(match.match_id)}">
-      <div class="match-meta">${fmtDate(match.date)} · ${escapeHtml(match.time || '--:--')} até ${escapeHtml(match.end_time || '--:--')} · ${escapeHtml(match.place_name || 'Sem local')} · ${divisionName(match.division)}</div>
+    return `<form class="result-form ${match.is_finished ? 'finished' : ''}" data-match-id="${escapeHtml(match.match_id)}">
+      <div class="match-meta">${fmtDate(match.date)} · ${escapeHtml(match.time || '--:--')} até ${escapeHtml(match.end_time || '--:--')} · ${escapeHtml(match.place_name || 'Sem local')} · ${divisionName(match.division)} ${match.manual_schedule ? '· agenda manual' : ''}</div>
       <strong>${escapeHtml(match.player1_name)} x ${escapeHtml(match.player2_name)}</strong>
+
+      <div class="manual-schedule">
+        <div class="manual-title">Agenda da partida</div>
+        <div class="manual-grid">
+          <label>Data
+            <select name="schedule_date">${buildDateOptions(match.date)}</select>
+          </label>
+          <label>Horário
+            <input type="time" name="schedule_time" value="${escapeHtml(match.time || '')}">
+          </label>
+          <label>Local
+            <select name="schedule_place_id">${buildPlaceOptions(match.place_id)}</select>
+          </label>
+          <button class="secondary" type="button" data-save-schedule>Salvar agenda</button>
+        </div>
+        <small>Essa alteração manual será perdida se o torneio for recalculado.</small>
+      </div>
+
       <div class="result-grid">
         <label>Vencedor
           <select name="winner_id" required>
@@ -225,7 +263,7 @@ function renderAdminMatches() {
         <label>Bolas ${escapeHtml(match.player2_name)}
           <input type="number" name="balls_p2" min="0" max="7" value="${match.balls_p2 || 0}">
         </label>
-        <button type="submit">Salvar</button>
+        <button type="submit">Salvar resultado</button>
         <button class="secondary" type="button" data-clear-result>Limpar</button>
       </div>
     </form>`;
@@ -240,6 +278,22 @@ function renderAdminMatches() {
       if (winner.value === match.player1_id) p1.value = 7;
       if (winner.value === match.player2_id) p2.value = 7;
     });
+
+    form.querySelector('[data-save-schedule]').addEventListener('click', async () => {
+      await adminFetch('/admin/match-schedule', {
+        method: 'POST',
+        body: JSON.stringify({
+          match_id: form.dataset.matchId,
+          date: form.querySelector('[name="schedule_date"]').value,
+          time: form.querySelector('[name="schedule_time"]').value,
+          place_id: form.querySelector('[name="schedule_place_id"]').value,
+        })
+      });
+      adminState = await adminFetch('/admin/state');
+      preserveScroll(renderAll);
+      toast('Agenda da partida salva.');
+    });
+
     form.addEventListener('submit', async (ev) => {
       ev.preventDefault();
       await adminFetch('/admin/result', {

@@ -275,6 +275,29 @@ tr.relegation td:first-child, .rank-relegation td:first-child { border-left: 4px
   margin-bottom: 12px;
 }
 .result-form.finished { border-color: rgba(40, 209, 124, .35); }
+.manual-schedule {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 14px;
+  background: rgba(0,0,0,.14);
+}
+.manual-title {
+  color: var(--accent);
+  font-weight: 800;
+  margin-bottom: 8px;
+}
+.manual-grid {
+  display: grid;
+  grid-template-columns: 1fr .7fr 1fr auto;
+  gap: 10px;
+  align-items: end;
+}
+.manual-schedule small {
+  display: block;
+  margin-top: 8px;
+  color: var(--muted);
+}
 .result-form .result-grid { display: grid; grid-template-columns: 1.2fr .9fr .9fr auto auto; gap: 10px; align-items: end; margin-top: 12px; }
 
 .filters, .filter-form { align-items: end; }
@@ -303,7 +326,7 @@ tr.relegation td:first-child, .rank-relegation td:first-child { border-left: 4px
 
 @media (max-width: 850px) {
   .topbar, .hero, .section-title, .match-row, .match-card { align-items: flex-start; flex-direction: column; }
-  .grid-2, .grid-3, .grid-4, .inline-form, .result-form .result-grid { grid-template-columns: 1fr; }
+  .grid-2, .grid-3, .grid-4, .inline-form, .manual-grid, .result-form .result-grid { grid-template-columns: 1fr; }
   .match-status { text-align: left; }
   table { min-width: 640px; }
 }

@@ -733,6 +733,87 @@ def public_state():
     }
 
 
+
+def get_match_time_window(match):
+    date = str(match.get("date") or "")
+    time_str = str(match.get("time") or "")
+    if not date or not time_str:
+        return None
+    try:
+        start = time_to_minutes(time_str)
+    except Exception:
+        return None
+    end_time = str(match.get("end_time") or "")
+    try:
+        end = time_to_minutes(end_time) if end_time else None
+    except Exception:
+        end = None
+    if end is None or end <= start:
+        duration = normalize_int(match.get("duration_minutes", get_config().get("duration_minutes", 30)), 30, 5, 240)
+        end = start + duration
+    return {"date": date, "start": start, "end": end, "place_id": str(match.get("place_id") or "")}
+
+
+def set_match_schedule(data):
+    match_id = str(data.get("match_id", ""))
+    match = get_item("MATCH", match_id)
+    if not match:
+        raise ValueError("Partida não encontrada.")
+
+    date = normalize_date(str(data.get("date", "")).strip())
+    if not date:
+        raise ValueError("Informe uma data válida para a partida.")
+    time_str = normalize_time(str(data.get("time", "")).strip(), "")
+    if not time_str:
+        raise ValueError("Informe um horário válido para a partida.")
+
+    place_id = str(data.get("place_id", "")).strip()
+    places = {str(p.get("place_id")): p for p in get_places()}
+    if place_id not in places:
+        raise ValueError("Selecione um local cadastrado para a partida.")
+
+    registered_dates = {str(d.get("date")) for d in get_dates()}
+    if date not in registered_dates:
+        raise ValueError("Cadastre essa data na seção Datas antes de usar na partida.")
+
+    config = get_config()
+    duration = normalize_int(match.get("duration_minutes", config.get("duration_minutes", 30)), config.get("duration_minutes", 30), 5, 240)
+    start = time_to_minutes(time_str)
+    end = start + duration
+    if end > 23 * 60 + 59:
+        raise ValueError("O horário escolhido faz a partida passar do fim do dia.")
+
+    # A alteração manual também respeita as regras principais do calendário:
+    # não ocupa o mesmo local no mesmo intervalo e não coloca jogador em conflito.
+    player_schedule = {}
+    for other in get_matches():
+        if str(other.get("match_id")) == match_id:
+            continue
+        window = get_match_time_window(other)
+        if not window:
+            continue
+        if window["date"] == date and window["place_id"] == place_id:
+            overlap = start < window["end"] and end > window["start"]
+            if overlap:
+                raise ValueError("Já existe outra partida nesse local nesse intervalo de horário.")
+        for pid in [other.get("player1_id"), other.get("player2_id")]:
+            if pid:
+                player_schedule.setdefault(str(pid), []).append(window)
+
+    for pid, nome in [(match.get("player1_id"), match.get("player1_name")), (match.get("player2_id"), match.get("player2_name"))]:
+        if not player_available(str(pid), date, start, end, place_id, player_schedule):
+            raise ValueError(f"A alteração gera conflito de horário ou deslocamento para {nome}.")
+
+    match["date"] = date
+    match["time"] = time_str
+    match["end_time"] = minutes_to_time(end)
+    match["duration_minutes"] = duration
+    match["place_id"] = place_id
+    match["place_name"] = places[place_id].get("name", "")
+    match["manual_schedule"] = True
+    put_item(match)
+    return match
+
 def set_match_result(data):
     match_id = str(data.get("match_id", ""))
     match = get_item("MATCH", match_id)
@@ -813,6 +894,9 @@ def handle_admin_mutation(event, action):
             return response(200, result)
         if action == "result":
             item = set_match_result(data)
+            return response(200, {"match": item})
+        if action == "match-schedule":
+            item = set_match_schedule(data)
             return response(200, {"match": item})
     except ValueError as exc:
         return response(400, {"error": str(exc)})
