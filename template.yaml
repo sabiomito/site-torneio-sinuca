@@ -48,7 +48,7 @@ Resources:
           TABLE_NAME: !Ref TournamentTable
           ADMIN_PASSWORD: !Ref AdminPassword
           SECRET_KEY: !Ref SecretKey
-          TRAVEL_BUFFER_MINUTES: '30'
+          DATABASE_RESET_VERSION: 'v7-rodadas-20260530-01'
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref TournamentTable

@@ -18,7 +18,7 @@
   <main class="container">
     <section class="login-card card" id="login-card">
       <h1>Área administrativa</h1>
-      <p class="muted">Informe a senha para criar torneios, editar agenda e lançar resultados.</p>
+      <p class="muted">Informe a senha para configurar o torneio, cadastrar rodadas e lançar resultados.</p>
       <form id="login-form" class="stack-form">
         <label>Senha
           <input type="password" id="admin-password" autocomplete="current-password" required autofocus>
@@ -33,55 +33,23 @@
         <div>
           <p class="eyebrow">Administração</p>
           <h1>Painel do torneio</h1>
-          <p>Cadastre competidores, locais, datas, recalcule calendário e lance os resultados.</p>
-        </div>
-      </section>
-
-      <section class="card collapsible closed" data-section="setup">
-        <button class="collapse-title" type="button"><span>▾</span> Criar / recriar torneio completo</button>
-        <div class="collapse-body">
-          <p class="muted">Essa opção zera jogadores, locais, datas e partidas. Use para começar um torneio novo.</p>
-          <form id="setup-form" class="stack-form">
-            <div class="grid-3">
-              <label>Quantidade de divisões
-                <input type="number" id="setup-division-count" min="1" value="2">
-              </label>
-              <label>Tempo estimado por partida, em minutos
-                <input type="number" id="setup-duration" min="5" step="5" value="30">
-              </label>
-              <div class="actions-end">
-                <button type="button" id="build-setup-fields" class="secondary">Montar campos</button>
-              </div>
-            </div>
-            <div id="rules-fields" class="rule-grid"></div>
-            <div class="grid-2">
-              <label>Locais de jogo, um por linha
-                <textarea id="setup-places" rows="4" placeholder="Mesa 1&#10;Mesa 2"></textarea>
-              </label>
-              <label>Agendas por local/chave, uma por linha
-                <textarea id="setup-sessions" rows="4" placeholder="2026-05-10 09:00 | Mesa 1 | 1 | A | 4&#10;2026-05-10 13:00 | Mesa 2 | 2 | B | 3"></textarea>
-                <small>Formato: data hora | local | divisão | chave | rodadas. Se faltar horário, usa 09:00; se faltar rodadas, usa 1.</small>
-              </label>
-            </div>
-            <div id="players-fields"></div>
-            <button type="submit">Criar torneio e calcular jogos</button>
-          </form>
+          <p>Configure divisões e chaves, cadastre competidores, crie rodadas e lance os resultados.</p>
         </div>
       </section>
 
       <section class="card collapsible closed" data-section="config">
-        <button class="collapse-title" type="button"><span>▾</span> Configurações atuais</button>
+        <button class="collapse-title" type="button"><span>▾</span> Configurações iniciais</button>
         <div class="collapse-body">
           <form id="config-form" class="stack-form">
             <div class="grid-3">
               <label>Quantidade de divisões
-                <input type="number" id="division-count" min="1">
+                <input type="number" id="division-count" min="1" max="20">
               </label>
-              <label>Tempo estimado por partida, em minutos
+              <label>Tempo por jogo, em minutos
                 <input type="number" id="duration-minutes" min="5" step="5">
               </label>
               <div class="actions-end">
-                <button type="button" id="build-rules" class="secondary">Atualizar campos</button>
+                <button type="button" id="build-rules" class="secondary">Atualizar divisões</button>
               </div>
             </div>
             <div id="current-rules-fields" class="rule-grid"></div>
@@ -93,7 +61,7 @@
       <section class="card collapsible closed" data-section="players">
         <button class="collapse-title" type="button"><span>▾</span> Competidores</button>
         <div class="collapse-body">
-          <form id="player-form" class="inline-form">
+          <form id="player-form" class="inline-form player-form">
             <label>Nome
               <input type="text" id="player-name" required>
             </label>
@@ -101,84 +69,57 @@
               <select id="player-division"></select>
             </label>
             <label>Chave
-              <input type="text" id="player-chave" value="A" maxlength="40">
+              <select id="player-chave"></select>
             </label>
             <button type="submit">Adicionar competidor</button>
           </form>
-          <div id="players-list"></div>
+          <div class="scroll-box" id="players-list"></div>
         </div>
       </section>
 
-      <section class="card collapsible closed" data-section="places">
-        <button class="collapse-title" type="button"><span>▾</span> Locais</button>
+      <section class="card collapsible closed" data-section="rounds">
+        <button class="collapse-title" type="button"><span>▾</span> Rodadas</button>
         <div class="collapse-body">
-          <form id="place-form" class="inline-form add-form">
-            <label>Novo local
-              <input type="text" id="place-name" required>
-            </label>
-            <button type="submit">Adicionar local</button>
-          </form>
-          <div id="places-list"></div>
-        </div>
-      </section>
+          <div class="round-summary" id="round-requirements"></div>
 
-      <section class="card collapsible closed" data-section="sessions">
-        <button class="collapse-title" type="button"><span>▾</span> Agendas por local e chave</button>
-        <div class="collapse-body">
-          <p class="muted">Cada agenda libera uma quantidade de rodadas para uma divisão/chave em um local, começando no horário informado. O sistema só coloca nessa agenda jogos de jogadores da mesma divisão e da mesma chave.</p>
-          <form id="session-form" class="session-form">
-            <label>Data
-              <input type="date" id="session-date" required>
-            </label>
-            <label>Horário inicial
-              <input type="time" id="session-start-time" value="09:00">
-            </label>
-            <label>Local
-              <select id="session-place" required></select>
+          <form id="round-form" class="round-form">
+            <label>Nome / local da rodada
+              <input type="text" id="round-name" required placeholder="Ex.: Mesa 1, Bar do João, Salão principal">
             </label>
             <label>Divisão
-              <select id="session-division"></select>
+              <select id="round-division"></select>
             </label>
             <label>Chave
-              <input type="text" id="session-chave" value="A" maxlength="40">
+              <select id="round-chave"></select>
             </label>
-            <label>Rodadas
-              <input type="number" id="session-rounds" value="1" min="1">
+            <label>Data
+              <input type="date" id="round-date" required>
             </label>
-            <button type="submit">Adicionar agenda</button>
+            <label>Horário inicial
+              <input type="time" id="round-start-time" value="09:00">
+            </label>
+            <div class="round-actions">
+              <button type="button" id="add-round-auto">Adicionar rodada automática</button>
+              <button type="button" id="prepare-round-manual" class="secondary">Adicionar rodada manual</button>
+            </div>
           </form>
-          <div id="sessions-list"></div>
-        </div>
-      </section>
 
-      <section class="card collapsible closed" data-section="recalculate">
-        <button class="collapse-title" type="button"><span>▾</span> Recalcular calendário</button>
-        <div class="collapse-body">
-          <p>Use depois de adicionar competidor, local, agenda ou mudar tempo da partida. Jogos já finalizados não serão remarcados. Alterações manuais de data, horário e local de jogos ainda pendentes serão descartadas no recalculo.</p>
-          <div class="schedule-rules">
-            <h3>Como o calendário é dividido</h3>
-            <ul>
-              <li>Os competidores são separados por divisão e por chave. Só há jogos entre jogadores da mesma divisão e da mesma chave.</li>
-              <li>Antes de montar os confrontos, os jogadores de cada divisão/chave são embaralhados com uma seed baseada no timestamp, para a ordem não repetir sempre.</li>
-              <li>As datas e horários não são mais genéricos: cada agenda pertence a um local, uma divisão e uma chave.</li>
-              <li>O campo Rodadas define quantas partidas cabem naquela agenda; os horários avançam pelo tempo estimado da partida.</li>
-              <li>O sistema tenta distribuir os jogos de cada jogador entre os dias disponíveis da sua chave, deixando a quantidade por dia o mais próxima possível.</li>
-              <li>Nenhum jogador pode ser colocado em duas partidas no mesmo horário.</li>
-              <li>O sistema evita deslocamento entre locais no mesmo dia; quando não houver alternativa, exige pelo menos 30 minutos após o fim da partida anterior.</li>
-              <li>Se faltarem rodadas/agendas para uma divisão/chave, os jogos restantes ficam pendentes até cadastrar nova agenda e recalcular.</li>
-              <li>Jogos já finalizados não são remarcados no recalculo. Jogos pendentes são reorganizados conforme as agendas atuais.</li>
-            </ul>
-          </div>
-          <button id="recalculate" type="button">Recalcular torneio</button>
+          <div id="manual-round-editor" class="manual-round-editor hidden"></div>
+
+          <h3 class="subheading">Rodadas cadastradas</h3>
+          <div class="scroll-box small" id="rounds-list"></div>
         </div>
       </section>
 
       <section class="card collapsible closed" data-section="matches">
         <button class="collapse-title" type="button"><span>▾</span> Partidas e resultados</button>
         <div class="collapse-body">
-          <div class="filters grid-5 sticky-filters">
+          <div class="filters grid-6 sticky-filters">
             <label>Data
               <select id="admin-filter-date"><option value="">Todas</option></select>
+            </label>
+            <label>Rodada
+              <select id="admin-filter-round"><option value="">Todas</option></select>
             </label>
             <label>Local
               <select id="admin-filter-place"><option value="">Todos</option></select>
@@ -194,18 +135,23 @@
             </label>
           </div>
           <button class="secondary" id="admin-clear-filters" type="button">Limpar filtros</button>
-          <p class="muted">Em cada partida você pode salvar resultado ou ajustar manualmente data, horário e local. O recalculo do calendário desfaz esses ajustes manuais.</p>
+          <p class="muted">O vencedor recebe automaticamente 7 bolas. Resultados salvos ficam preservados mesmo se uma rodada for excluída.</p>
           <div id="admin-matches"></div>
+        </div>
+      </section>
+
+      <section class="card collapsible closed danger-zone" data-section="danger">
+        <button class="collapse-title" type="button"><span>▾</span> Zona de perigo</button>
+        <div class="collapse-body">
+          <h2>Limpar banco de dados do torneio</h2>
+          <p class="muted">Isso apaga configurações, competidores, rodadas, partidas e resultados. Não tem volta.</p>
+          <button id="clear-database" type="button" class="danger">Limpar banco de dados</button>
         </div>
       </section>
     </div>
 
     <div id="toast" class="toast hidden"></div>
   </main>
-
-  <footer class="footer">
-    <span>Placar por pontos: vitória = 3 pontos. Desempate: saldo de bolas mortas.</span>
-  </footer>
 
   <script src="/config.js"></script>
   <script src="/js/api.js"></script>

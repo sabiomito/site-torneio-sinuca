@@ -98,6 +98,7 @@ function getFilteredMatches(matches, filters) {
     if (filters.player && match.player1_id !== filters.player && match.player2_id !== filters.player) return false;
     if (filters.division && String(match.division) !== String(filters.division)) return false;
     if (filters.chave && normalizeChaveLabel(match.chave) !== normalizeChaveLabel(filters.chave)) return false;
+    if (filters.round && match.round_id !== filters.round) return false;
     return true;
   });
 }
@@ -133,7 +134,7 @@ function renderMatches(container, matches) {
       const rows = byPlace[place].sort((a,b) => String(a.time).localeCompare(String(b.time))).map(match => `
         <div class="match-row ${match.is_finished ? 'finished' : ''}">
           <div class="match-main">
-            <span class="pill">${divisionName(match.division)} · Chave ${escapeHtml(normalizeChaveLabel(match.chave))}</span>
+            <span class="pill">${divisionName(match.division)} · Chave ${escapeHtml(normalizeChaveLabel(match.chave))} · Rodada ${escapeHtml(match.round_number || '-')}</span>
             <span class="time">${escapeHtml(match.time || '--:--')}</span>
             <strong>${escapeHtml(match.player1_name)}</strong>
             <span class="versus">x</span>
