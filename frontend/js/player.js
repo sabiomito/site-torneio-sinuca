@@ -9,7 +9,7 @@ async function loadPlayer() {
   try {
     const data = await apiFetch(`/player/${encodeURIComponent(playerId)}`);
     document.getElementById('player-title').textContent = data.player.name;
-    document.getElementById('player-subtitle').textContent = `${divisionName(data.player.division)} · Todas as partidas`;
+    document.getElementById('player-subtitle').textContent = `${divisionName(data.player.division)} · Chave ${normalizeChaveLabel(data.player.chave)} · Todas as partidas`;
     renderMatches(container, data.matches);
   } catch (err) {
     container.innerHTML = `<div class="empty">${escapeHtml(err.message)}</div>`;

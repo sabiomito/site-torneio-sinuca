@@ -32,9 +32,9 @@
       </div>
       <div class="legend-row">
         <span class="legend-chip promotion">Promoção</span>
-        <span class="muted">linha verde: sobe para a divisão acima</span>
+        <span class="muted">linha verde: sobe ou foi marcada como verde pelo admin</span>
         <span class="legend-chip relegation">Rebaixamento</span>
-        <span class="muted">linha vermelha: cai para a divisão abaixo</span>
+        <span class="muted">linha vermelha: cai ou foi marcada como vermelha pelo admin</span>
       </div>
     </section>
 
@@ -43,9 +43,9 @@
     <section class="card">
       <div class="section-title">
         <h2>Filtrar jogos</h2>
-        <span>por data, local, competidor e/ou divisão</span>
+        <span>por data, local, competidor, divisão e/ou chave</span>
       </div>
-      <div class="filters grid-4 public-filter-form">
+      <div class="filters grid-5 public-filter-form">
         <label>Data
           <select id="filter-date"><option value="">Todas</option></select>
         </label>
@@ -57,6 +57,9 @@
         </label>
         <label>Divisão
           <select id="filter-division"><option value="">Todas</option></select>
+        </label>
+        <label>Chave
+          <select id="filter-chave"><option value="">Todas</option></select>
         </label>
       </div>
       <button class="secondary" id="clear-filters" type="button">Limpar filtros</button>

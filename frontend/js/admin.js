@@ -21,6 +21,25 @@ function preserveScroll(fn) {
   return result;
 }
 
+function normalizeChave(value) {
+  return String(value || 'A').trim().toUpperCase() || 'A';
+}
+
+function uniqueChaves() {
+  const values = new Set();
+  (adminState?.players || []).forEach(p => values.add(normalizeChave(p.chave)));
+  (adminState?.sessions || []).forEach(s => values.add(normalizeChave(s.chave)));
+  (adminState?.matches || []).forEach(m => values.add(normalizeChave(m.chave)));
+  return [...values].sort();
+}
+
+function fillChaveSelect(select, firstLabel = 'Todas') {
+  const current = select.value;
+  select.innerHTML = `<option value="">${escapeHtml(firstLabel)}</option>`;
+  uniqueChaves().forEach(chave => select.insertAdjacentHTML('beforeend', `<option value="${escapeHtml(chave)}">${escapeHtml(chave)}</option>`));
+  if ([...select.options].some(opt => opt.value === current)) select.value = current;
+}
+
 async function adminFetch(path, options = {}) {
   return apiFetch(path, Object.assign({}, options, {admin: true}));
 }
@@ -58,13 +77,14 @@ function buildRuleFields(containerId, divisionCount, rules = {}) {
     html += `<div class="rule-card" data-division="${d}">
       <h4>${divisionName(d)}</h4>
       <div class="grid-2">
-        <label>Sobem
-          <input type="number" min="0" class="rule-promotion" value="${d === 1 ? 0 : (rule.promotion_count || 0)}" ${d === 1 ? 'disabled' : ''}>
+        <label>Sobem / marcar verde
+          <input type="number" min="0" class="rule-promotion" value="${rule.promotion_count || 0}">
         </label>
-        <label>Caem
-          <input type="number" min="0" class="rule-relegation" value="${d === divisionCount ? 0 : (rule.relegation_count || 0)}" ${d === divisionCount ? 'disabled' : ''}>
+        <label>Caem / marcar vermelho
+          <input type="number" min="0" class="rule-relegation" value="${rule.relegation_count || 0}">
         </label>
       </div>
+      <small>Mesmo sem divisão acima/abaixo, esses campos pintam a tabela.</small>
     </div>`;
   }
   container.innerHTML = html;
@@ -106,20 +126,28 @@ function buildSetupPlayerFields() {
   const count = Number(document.getElementById('setup-division-count').value || 2);
   buildRuleFields('rules-fields', count, {});
   const container = document.getElementById('players-fields');
-  let html = '<h3>Competidores por divisão</h3><div class="grid-2">';
+  let html = '<h3>Competidores por divisão e chave</h3><p class="muted">Use um jogador por linha. Para informar a chave, use: Nome | A. Se não informar, vai para a chave A.</p><div class="grid-2">';
   for (let d = 1; d <= count; d++) {
     html += `<label>${divisionName(d)} — um jogador por linha
-      <textarea class="setup-players" data-division="${d}" rows="6" placeholder="Jogador 1&#10;Jogador 2"></textarea>
+      <textarea class="setup-players" data-division="${d}" rows="6" placeholder="Jogador 1 | A&#10;Jogador 2 | A&#10;Jogador 3 | B"></textarea>
     </label>`;
   }
   html += '</div>';
   container.innerHTML = html;
 }
 
-function parseSetupDates(text) {
+function parseSetupSessions(text) {
   return text.split('\n').map(line => line.trim()).filter(Boolean).map(line => {
-    const parts = line.split(/\s+/);
-    return {date: parts[0], start_time: parts[1] || '09:00'};
+    const parts = line.split('|').map(x => x.trim());
+    const dateTime = (parts[0] || '').split(/\s+/);
+    return {
+      date: dateTime[0] || '',
+      start_time: dateTime[1] || '09:00',
+      place_name: parts[1] || '',
+      division: Number(parts[2] || 1),
+      chave: normalizeChave(parts[3] || 'A'),
+      rounds: Number(parts[4] || 1),
+    };
   });
 }
 
@@ -127,24 +155,31 @@ function parseSetupPlayers() {
   const players = [];
   document.querySelectorAll('.setup-players').forEach(area => {
     const division = Number(area.dataset.division || 1);
-    area.value.split('\n').map(x => x.trim()).filter(Boolean).forEach(name => players.push({name, division}));
+    area.value.split('\n').map(x => x.trim()).filter(Boolean).forEach(line => {
+      const parts = line.split('|').map(x => x.trim());
+      players.push({name: parts[0], division, chave: normalizeChave(parts[1] || 'A')});
+    });
   });
   return players;
 }
 
 function renderAll() {
   const config = adminState.config;
+  adminState.sessions = adminState.sessions || [];
   document.getElementById('division-count').value = config.division_count;
   document.getElementById('duration-minutes').value = config.duration_minutes;
   buildRuleFields('current-rules-fields', config.division_count, config.rules || {});
   fillDivisionSelect(document.getElementById('player-division'), config.division_count, null);
+  fillDivisionSelect(document.getElementById('session-division'), config.division_count, null);
+  fillSelect(document.getElementById('session-place'), adminState.places, 'place_id', 'name', 'Selecione');
   fillSelect(document.getElementById('admin-filter-date'), adminState.dates, 'date', d => fmtDate(d.date), 'Todas');
   fillSelect(document.getElementById('admin-filter-place'), adminState.places, 'place_id', 'name', 'Todos');
-  fillSelect(document.getElementById('admin-filter-player'), adminState.players, 'player_id', 'name', 'Todos');
+  fillSelect(document.getElementById('admin-filter-player'), adminState.players, 'player_id', p => `${p.name} — ${divisionName(p.division)} / Chave ${normalizeChave(p.chave)}`, 'Todos');
   fillDivisionSelect(document.getElementById('admin-filter-division'), config.division_count, 'Todas');
+  fillChaveSelect(document.getElementById('admin-filter-chave'), 'Todas');
   renderPlayersList();
   renderPlacesList();
-  renderDatesList();
+  renderSessionsList();
   renderAdminMatches();
 }
 
@@ -155,7 +190,7 @@ function renderPlayersList() {
     return;
   }
   container.innerHTML = adminState.players.map(p => `<div class="list-item">
-    <div><strong>${escapeHtml(p.name)}</strong><div class="match-meta">${divisionName(p.division)}</div></div>
+    <div><strong>${escapeHtml(p.name)}</strong><div class="match-meta">${divisionName(p.division)} · Chave ${escapeHtml(normalizeChave(p.chave))}</div></div>
     <button class="small danger" data-delete-player="${escapeHtml(p.player_id)}">Excluir</button>
   </div>`).join('');
   container.querySelectorAll('[data-delete-player]').forEach(btn => {
@@ -190,24 +225,27 @@ function renderPlacesList() {
   });
 }
 
-function renderDatesList() {
-  const container = document.getElementById('dates-list');
-  if (!adminState.dates.length) {
-    container.innerHTML = '<div class="empty">Nenhuma data cadastrada.</div>';
+function renderSessionsList() {
+  const container = document.getElementById('sessions-list');
+  const sessions = adminState.sessions || [];
+  if (!sessions.length) {
+    container.innerHTML = '<div class="empty">Nenhuma agenda cadastrada. Sem agenda, os jogos ficam pendentes.</div>';
     return;
   }
-  container.innerHTML = adminState.dates.map(d => `<div class="list-item">
-    <strong>${fmtDate(d.date)}</strong>
-    <span class="match-meta">Início ${escapeHtml(d.start_time || '09:00')}</span>
-    <button class="small danger" data-delete-date="${escapeHtml(d.date_id)}">Excluir</button>
+  container.innerHTML = sessions.map(s => `<div class="list-item session-item">
+    <div>
+      <strong>${fmtDate(s.date)} · ${escapeHtml(s.start_time || '09:00')} · ${escapeHtml(s.place_name || '')}</strong>
+      <div class="match-meta">${divisionName(s.division)} · Chave ${escapeHtml(normalizeChave(s.chave))} · ${s.rounds || 1} rodada(s)</div>
+    </div>
+    <button class="small danger" data-delete-session="${escapeHtml(s.session_id)}">Excluir</button>
   </div>`).join('');
-  container.querySelectorAll('[data-delete-date]').forEach(btn => {
+  container.querySelectorAll('[data-delete-session]').forEach(btn => {
     btn.addEventListener('click', async () => {
-      if (!confirm('Excluir esta data? Depois use Recalcular torneio.')) return;
-      await adminFetch('/admin/delete-date', {method: 'POST', body: JSON.stringify({date_id: btn.dataset.deleteDate})});
+      if (!confirm('Excluir esta agenda? Jogos finalizados ficam preservados; pendentes serão reorganizados no recalculo.')) return;
+      await adminFetch('/admin/delete-session', {method: 'POST', body: JSON.stringify({session_id: btn.dataset.deleteSession})});
       adminState = await adminFetch('/admin/state');
       preserveScroll(renderAll);
-      toast('Data excluída. Recalcule o calendário.');
+      toast('Agenda excluída. Recalcule o calendário.');
     });
   });
 }
@@ -218,6 +256,7 @@ function renderAdminMatches() {
     place: document.getElementById('admin-filter-place').value,
     player: document.getElementById('admin-filter-player').value,
     division: document.getElementById('admin-filter-division').value,
+    chave: document.getElementById('admin-filter-chave').value,
   };
   const matches = getFilteredMatches(adminState.matches, filters);
   const container = document.getElementById('admin-matches');
@@ -228,8 +267,9 @@ function renderAdminMatches() {
   container.innerHTML = matches.map(match => {
     const p1Win = match.winner_id === match.player1_id;
     const p2Win = match.winner_id === match.player2_id;
+    const chave = normalizeChave(match.chave);
     return `<form class="result-form ${match.is_finished ? 'finished' : ''}" data-match-id="${escapeHtml(match.match_id)}">
-      <div class="match-meta">${fmtDate(match.date)} · ${escapeHtml(match.time || '--:--')} até ${escapeHtml(match.end_time || '--:--')} · ${escapeHtml(match.place_name || 'Sem local')} · ${divisionName(match.division)} ${match.manual_schedule ? '· agenda manual' : ''}</div>
+      <div class="match-meta">${fmtDate(match.date)} · ${escapeHtml(match.time || '--:--')} até ${escapeHtml(match.end_time || '--:--')} · ${escapeHtml(match.place_name || 'Sem local')} · ${divisionName(match.division)} · Chave ${escapeHtml(chave)} ${match.manual_schedule ? '· agenda manual' : ''} ${match.is_finished ? '· finalizada' : ''}</div>
       <strong>${escapeHtml(match.player1_name)} x ${escapeHtml(match.player2_name)}</strong>
 
       <div class="manual-schedule">
@@ -246,7 +286,7 @@ function renderAdminMatches() {
           </label>
           <button class="secondary" type="button" data-save-schedule>Salvar agenda</button>
         </div>
-        <small>Essa alteração manual será perdida se o torneio for recalculado.</small>
+        <small>Essa alteração manual será perdida se o torneio for recalculado, exceto se a partida já estiver finalizada.</small>
       </div>
 
       <div class="result-grid">
@@ -349,7 +389,7 @@ function setupEvents() {
     ev.preventDefault();
     if (!confirm('Criar um novo torneio vai apagar os dados atuais. Continuar?')) return;
     const places = document.getElementById('setup-places').value.split('\n').map(x => x.trim()).filter(Boolean);
-    const dates = parseSetupDates(document.getElementById('setup-dates').value);
+    const sessions = parseSetupSessions(document.getElementById('setup-sessions').value);
     const players = parseSetupPlayers();
     await adminFetch('/admin/setup', {
       method: 'POST',
@@ -358,7 +398,7 @@ function setupEvents() {
         duration_minutes: Number(document.getElementById('setup-duration').value || 30),
         rules: collectRules('rules-fields'),
         places,
-        dates,
+        sessions,
         players,
       })
     });
@@ -386,9 +426,14 @@ function setupEvents() {
     ev.preventDefault();
     await adminFetch('/admin/player', {
       method: 'POST',
-      body: JSON.stringify({name: document.getElementById('player-name').value, division: Number(document.getElementById('player-division').value)})
+      body: JSON.stringify({
+        name: document.getElementById('player-name').value,
+        division: Number(document.getElementById('player-division').value),
+        chave: normalizeChave(document.getElementById('player-chave').value),
+      })
     });
     document.getElementById('player-name').value = '';
+    document.getElementById('player-chave').value = 'A';
     adminState = await adminFetch('/admin/state');
     preserveScroll(renderAll);
     toast('Competidor adicionado. Recalcule o calendário.');
@@ -403,13 +448,25 @@ function setupEvents() {
     toast('Local adicionado. Recalcule o calendário.');
   });
 
-  document.getElementById('date-form').addEventListener('submit', async ev => {
+  document.getElementById('session-form').addEventListener('submit', async ev => {
     ev.preventDefault();
-    await adminFetch('/admin/date', {method: 'POST', body: JSON.stringify({date: document.getElementById('date-value').value, start_time: document.getElementById('date-start-time').value || '09:00'})});
-    document.getElementById('date-value').value = '';
+    await adminFetch('/admin/session', {
+      method: 'POST',
+      body: JSON.stringify({
+        date: document.getElementById('session-date').value,
+        start_time: document.getElementById('session-start-time').value || '09:00',
+        place_id: document.getElementById('session-place').value,
+        division: Number(document.getElementById('session-division').value || 1),
+        chave: normalizeChave(document.getElementById('session-chave').value),
+        rounds: Number(document.getElementById('session-rounds').value || 1),
+      })
+    });
+    document.getElementById('session-date').value = '';
+    document.getElementById('session-chave').value = 'A';
+    document.getElementById('session-rounds').value = '1';
     adminState = await adminFetch('/admin/state');
     preserveScroll(renderAll);
-    toast('Data adicionada. Recalcule o calendário.');
+    toast('Agenda adicionada. Recalcule o calendário.');
   });
 
   document.getElementById('recalculate').addEventListener('click', async () => {
@@ -419,11 +476,11 @@ function setupEvents() {
     toast(result.message || 'Calendário recalculado.');
   });
 
-  ['admin-filter-date','admin-filter-place','admin-filter-player','admin-filter-division'].forEach(id => {
+  ['admin-filter-date','admin-filter-place','admin-filter-player','admin-filter-division','admin-filter-chave'].forEach(id => {
     document.getElementById(id).addEventListener('change', renderAdminMatches);
   });
   document.getElementById('admin-clear-filters').addEventListener('click', () => {
-    ['admin-filter-date','admin-filter-place','admin-filter-player','admin-filter-division'].forEach(id => document.getElementById(id).value = '');
+    ['admin-filter-date','admin-filter-place','admin-filter-player','admin-filter-division','admin-filter-chave'].forEach(id => document.getElementById(id).value = '');
     renderAdminMatches();
   });
 }

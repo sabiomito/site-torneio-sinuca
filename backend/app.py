@@ -196,6 +196,13 @@ def normalize_time(value, default="09:00"):
         return default
 
 
+def normalize_chave(value, default="A"):
+    chave = str(value or "").strip().upper()
+    if not chave:
+        chave = default
+    return chave[:40]
+
+
 def parse_dt(date_str, time_str):
     return datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
 
@@ -238,7 +245,9 @@ def get_config():
 
 def get_players():
     players = scan_type("PLAYER")
-    return sorted(players, key=lambda p: (normalize_int(p.get("division"), 1), str(p.get("name", "")).lower()))
+    for player in players:
+        player["chave"] = normalize_chave(player.get("chave", "A"))
+    return sorted(players, key=lambda p: (normalize_int(p.get("division"), 1), str(p.get("chave", "A")), str(p.get("name", "")).lower()))
 
 
 def get_places():
@@ -246,19 +255,55 @@ def get_places():
     return sorted(places, key=lambda p: str(p.get("name", "")).lower())
 
 
-def get_dates():
+def get_date_items():
     dates = scan_type("DATE")
     return sorted(dates, key=lambda d: (str(d.get("date", "")), str(d.get("start_time", "09:00"))))
 
 
+def get_sessions():
+    sessions = scan_type("SESSION")
+    for session in sessions:
+        session["chave"] = normalize_chave(session.get("chave", "A"))
+        session["division"] = normalize_int(session.get("division", 1), 1, 1, 20)
+        session["rounds"] = normalize_int(session.get("rounds", 1), 1, 1, 200)
+    return sorted(sessions, key=lambda s: (str(s.get("date", "")), str(s.get("start_time", "09:00")), str(s.get("place_name", "")), normalize_int(s.get("division", 1)), str(s.get("chave", "A"))))
+
+
+def get_dates():
+    # Lista de datas para filtros e edição manual. Mantém compatibilidade com
+    # datas antigas, mas também inclui datas das agendas por local/chave.
+    by_date = {}
+    for d in get_date_items():
+        date = str(d.get("date", ""))
+        if date:
+            by_date[date] = dict(d)
+    for s in get_sessions():
+        date = str(s.get("date", ""))
+        if not date:
+            continue
+        current = by_date.get(date)
+        start_time = normalize_time(s.get("start_time", "09:00"), "09:00")
+        if not current or start_time < str(current.get("start_time", "99:99")):
+            by_date[date] = {
+                "pk": "DATE",
+                "sk": f"session_{date}",
+                "type": "DATE",
+                "date_id": f"session_{date}",
+                "date": date,
+                "start_time": start_time,
+                "from_session": True,
+            }
+    return sorted(by_date.values(), key=lambda d: (str(d.get("date", "")), str(d.get("start_time", "09:00"))))
+
+
 def get_matches():
     matches = scan_type("MATCH")
-    return sorted(matches, key=lambda m: (str(m.get("date", "9999-99-99")), str(m.get("time", "99:99")), str(m.get("place_name", ""))))
+    return sorted(matches, key=lambda m: (str(m.get("date") or "9999-99-99"), str(m.get("time") or "99:99"), str(m.get("place_name", "")), str(m.get("chave", "A"))))
 
 
-def build_pair_key(division, p1_id, p2_id):
+def build_pair_key(division, chave, p1_id, p2_id):
     ordered = sorted([str(p1_id), str(p2_id)])
-    return f"D{division}#{ordered[0]}#{ordered[1]}"
+    return f"D{division}#K{normalize_chave(chave)}#{ordered[0]}#{ordered[1]}"
 
 
 def make_id(prefix):
@@ -295,6 +340,7 @@ def upsert_player(data):
         raise ValueError("Informe o nome do jogador.")
     config = get_config()
     division = normalize_int(data.get("division", 1), 1, 1, config["division_count"])
+    chave = normalize_chave(data.get("chave", "A"))
     player_id = str(data.get("player_id") or data.get("id") or make_id("player"))
     item = {
         "pk": "PLAYER",
@@ -303,6 +349,7 @@ def upsert_player(data):
         "player_id": player_id,
         "name": name,
         "division": division,
+        "chave": chave,
         "created_at": data.get("created_at") or now_iso(),
     }
     put_item(item)
@@ -345,8 +392,45 @@ def upsert_date(data):
     return item
 
 
+def upsert_session(data):
+    date = normalize_date(str(data.get("date", "")).strip())
+    if not date:
+        raise ValueError("Informe uma data válida para a agenda.")
+    start_time = normalize_time(str(data.get("start_time") or "09:00").strip(), "09:00")
+    place_id = str(data.get("place_id", "")).strip()
+    places = {str(p.get("place_id")): p for p in get_places()}
+    if place_id not in places:
+        place_name = str(data.get("place_name", "")).strip().lower()
+        found = next((p for p in places.values() if str(p.get("name", "")).strip().lower() == place_name), None)
+        if found:
+            place_id = found.get("place_id")
+    if place_id not in places:
+        raise ValueError("Selecione um local cadastrado para a agenda.")
+    config = get_config()
+    division = normalize_int(data.get("division", 1), 1, 1, config["division_count"])
+    chave = normalize_chave(data.get("chave", "A"))
+    rounds = normalize_int(data.get("rounds", 1), 1, 1, 200)
+    session_id = str(data.get("session_id") or data.get("id") or make_id("session"))
+    item = {
+        "pk": "SESSION",
+        "sk": session_id,
+        "type": "SESSION",
+        "session_id": session_id,
+        "date": date,
+        "start_time": start_time,
+        "place_id": place_id,
+        "place_name": places[place_id].get("name", ""),
+        "division": division,
+        "chave": chave,
+        "rounds": rounds,
+        "created_at": data.get("created_at") or now_iso(),
+    }
+    put_item(item)
+    return item
+
+
 def clear_all_data():
-    for item_type in ["PLAYER", "PLACE", "DATE", "MATCH"]:
+    for item_type in ["PLAYER", "PLACE", "DATE", "SESSION", "MATCH"]:
         for item in scan_type(item_type):
             delete_item(item["pk"], item["sk"])
 
@@ -390,48 +474,46 @@ def distribute_integer_targets(total, keys, rng=None):
     return targets
 
 
-def slot_candidates(dates, places, duration_minutes, total_matches):
-    # Gera horários por combinação data/local. O número de horários por local/dia
-    # é maior que a meta média para permitir ajustes por conflito de jogadores.
-    day_place_count = max(1, len(dates) * len(places))
-    average_slots = (total_matches // day_place_count) + 1
-    max_slots_per_place_day = max(24, average_slots + len(places) + 12)
+def slot_candidates_from_sessions(sessions, duration_minutes):
     candidates = []
-    for date_item in dates:
-        date = date_item["date"]
-        start_time = normalize_time(date_item.get("start_time", "09:00"), "09:00")
-        start_base = time_to_minutes(start_time)
-        for slot_idx in range(max_slots_per_place_day):
-            start = start_base + slot_idx * duration_minutes
+    for session in sessions:
+        start_base = time_to_minutes(normalize_time(session.get("start_time", "09:00"), "09:00"))
+        rounds = normalize_int(session.get("rounds", 1), 1, 1, 200)
+        for round_idx in range(rounds):
+            start = start_base + round_idx * duration_minutes
             end = start + duration_minutes
             if end > 23 * 60 + 59:
                 continue
-            for place in places:
-                candidates.append({
-                    "date": date,
-                    "time": minutes_to_time(start),
-                    "end_time": minutes_to_time(end),
-                    "start": start,
-                    "end": end,
-                    "place_id": place["place_id"],
-                    "place_name": place["name"],
-                })
+            candidates.append({
+                "session_id": session.get("session_id", ""),
+                "date": session["date"],
+                "time": minutes_to_time(start),
+                "end_time": minutes_to_time(end),
+                "start": start,
+                "end": end,
+                "place_id": session["place_id"],
+                "place_name": session.get("place_name", ""),
+                "division": normalize_int(session.get("division", 1), 1),
+                "chave": normalize_chave(session.get("chave", "A")),
+                "round_index": round_idx + 1,
+                "rounds": rounds,
+            })
     return candidates
+
 
 def generate_schedule():
     config = get_config()
     duration = config["duration_minutes"]
     players = get_players()
-    places = get_places()
-    dates = get_dates()
+    sessions = get_sessions()
     if not players:
         return {"created": 0, "message": "Cadastre jogadores antes de recalcular."}
-    if not places:
-        return {"created": 0, "message": "Cadastre pelo menos um local antes de recalcular."}
-    if not dates:
-        today = datetime.utcnow().strftime("%Y-%m-%d")
-        upsert_date({"date": today, "start_time": "09:00"})
-        dates = get_dates()
+    if not sessions:
+        return {
+            "created": 0,
+            "unscheduled": 0,
+            "message": "Cadastre agendas por data, horário, local, divisão e chave antes de recalcular.",
+        }
 
     seed = time.time_ns()
     rng = random.Random(seed)
@@ -440,142 +522,181 @@ def generate_schedule():
     put_item(config)
 
     existing_matches = get_matches()
-    previous_by_pair = {str(m.get("pair_key")): m for m in existing_matches if m.get("pair_key")}
+    previous_by_pair = {}
+    for old in existing_matches:
+        if old.get("player1_id") and old.get("player2_id"):
+            canonical_pair_key = build_pair_key(
+                normalize_int(old.get("division", 1), 1),
+                normalize_chave(old.get("chave", "A")),
+                old.get("player1_id"),
+                old.get("player2_id"),
+            )
+            previous_by_pair[canonical_pair_key] = old
+        elif old.get("pair_key"):
+            previous_by_pair[str(old.get("pair_key"))] = old
     current_pair_keys = set()
 
-    pairs = []
-    for division in range(1, config["division_count"] + 1):
-        division_players = [p for p in players if normalize_int(p.get("division"), 1) == division]
-        # O sorteio começa embaralhando os jogadores da divisão. A seed usa timestamp,
-        # então cada recalculo tende a criar uma ordem diferente de confrontos.
-        rng.shuffle(division_players)
-        for p1, p2 in combinations(division_players, 2):
-            pair_key = build_pair_key(division, p1["player_id"], p2["player_id"])
+    all_pairs = []
+    players_by_group = {}
+    for p in players:
+        group_key = (normalize_int(p.get("division"), 1), normalize_chave(p.get("chave", "A")))
+        players_by_group.setdefault(group_key, []).append(p)
+
+    for (division, chave), group_players in sorted(players_by_group.items()):
+        rng.shuffle(group_players)
+        for p1, p2 in combinations(group_players, 2):
+            pair_key = build_pair_key(division, chave, p1["player_id"], p2["player_id"])
             current_pair_keys.add(pair_key)
-            pairs.append({
+            all_pairs.append({
                 "division": division,
+                "chave": chave,
                 "player1_id": p1["player_id"],
                 "player1_name": p1["name"],
                 "player2_id": p2["player_id"],
                 "player2_name": p2["name"],
                 "pair_key": pair_key,
             })
+    rng.shuffle(all_pairs)
 
-    rng.shuffle(pairs)
-
-    # Remove jogos que deixaram de existir por mudança de competidor/divisão.
+    # Jogos já finalizados não são alterados no recalculo, mesmo que a agenda mude.
+    # Jogos antigos que não fazem mais sentido são apagados apenas se ainda não aconteceram.
+    finished_pair_keys = set()
+    fixed_finished_matches = []
     for old_match in existing_matches:
-        if old_match.get("pair_key") not in current_pair_keys:
+        is_finished = bool(old_match.get("is_finished"))
+        pair_key = str(old_match.get("pair_key") or "")
+        canonical_pair_key = pair_key
+        if old_match.get("player1_id") and old_match.get("player2_id"):
+            canonical_pair_key = build_pair_key(
+                normalize_int(old_match.get("division", 1), 1),
+                normalize_chave(old_match.get("chave", "A")),
+                old_match.get("player1_id"),
+                old_match.get("player2_id"),
+            )
+        if is_finished:
+            if canonical_pair_key:
+                finished_pair_keys.add(canonical_pair_key)
+            fixed_finished_matches.append(old_match)
+            continue
+        if canonical_pair_key and canonical_pair_key not in current_pair_keys:
             delete_item(old_match["pk"], old_match["sk"])
 
-    if not pairs:
+    pairs = [pair for pair in all_pairs if pair["pair_key"] not in finished_pair_keys]
+
+    if not all_pairs:
         return {
             "created": 0,
             "unscheduled": 0,
             "seed": seed,
-            "message": "Não há confrontos suficientes. Cada divisão precisa ter pelo menos 2 jogadores.",
+            "message": "Não há confrontos suficientes. Cada chave precisa ter pelo menos 2 jogadores.",
         }
 
-    date_keys = [d["date"] for d in dates]
-    day_place_keys = [(d["date"], p["place_id"]) for d in dates for p in places]
-    target_by_day_place = distribute_integer_targets(len(pairs), day_place_keys, rng)
-    target_by_date = distribute_integer_targets(len(pairs), date_keys, rng)
+    candidates = slot_candidates_from_sessions(sessions, duration)
+    candidates.sort(key=lambda c: (c["date"], c["start"], c["place_name"], c["division"], c["chave"]))
+
+    player_schedule = {}
+    occupied_slots = set()
+    session_load = {}
+    date_place_load = {}
+    date_load = {}
+    player_date_load = {}
+
+    # Bloqueia horários já ocupados por partidas finalizadas para não remexer no que já aconteceu.
+    for match in fixed_finished_matches:
+        window = get_match_time_window(match)
+        if not window:
+            continue
+        place_id = str(match.get("place_id") or "")
+        if place_id:
+            occupied_slots.add((window["date"], window["start"], place_id))
+        date_key = window["date"]
+        dp_key = (window["date"], place_id)
+        date_load[date_key] = date_load.get(date_key, 0) + 1
+        date_place_load[dp_key] = date_place_load.get(dp_key, 0) + 1
+        for pid in [match.get("player1_id"), match.get("player2_id")]:
+            if not pid:
+                continue
+            pid = str(pid)
+            player_schedule.setdefault(pid, []).append(window)
+            player_date_load.setdefault(pid, {})[date_key] = player_date_load.setdefault(pid, {}).get(date_key, 0) + 1
+
+    # Metas de equilíbrio por grupo/chave: os slots configurados são a capacidade máxima,
+    # mas o agendador tenta espalhar os jogos entre dias/locais e entre os dias de cada jogador.
+    candidate_dates_by_group = {}
+    for c in candidates:
+        group = (c["division"], c["chave"])
+        candidate_dates_by_group.setdefault(group, set()).add(c["date"])
 
     player_total_games = {}
     for pair in pairs:
         player_total_games[pair["player1_id"]] = player_total_games.get(pair["player1_id"], 0) + 1
         player_total_games[pair["player2_id"]] = player_total_games.get(pair["player2_id"], 0) + 1
 
-    target_by_player_date = {
-        player_id: distribute_integer_targets(total, date_keys, rng)
-        for player_id, total in player_total_games.items()
-    }
+    all_candidate_dates = sorted({c["date"] for c in candidates})
+    target_by_player_date = {}
+    for player_id, total in player_total_games.items():
+        player = next((p for p in players if p.get("player_id") == player_id), None)
+        group_dates = all_candidate_dates
+        if player:
+            group = (normalize_int(player.get("division"), 1), normalize_chave(player.get("chave", "A")))
+            group_dates = sorted(candidate_dates_by_group.get(group) or all_candidate_dates)
+        target_by_player_date[player_id] = distribute_integer_targets(total, group_dates, rng)
 
-    candidates = slot_candidates(dates, places, duration, len(pairs))
-    candidates.sort(key=lambda c: (c["start"], c["date"], c["place_name"]))
-
-    player_schedule = {}
-    occupied_slots = set()
-    date_place_load = {key: 0 for key in day_place_keys}
-    date_load = {date: 0 for date in date_keys}
-    player_date_load = {pid: {date: 0 for date in date_keys} for pid in player_total_games}
     scheduled_items = []
     unscheduled = []
 
     def player_day_load(player_id, date):
-        return player_date_load.setdefault(player_id, {d: 0 for d in date_keys}).get(date, 0)
+        return player_date_load.setdefault(player_id, {}).get(date, 0)
 
     def score_candidate(pair, candidate):
-        day_place_key = (candidate["date"], candidate["place_id"])
-        dp_after = date_place_load.get(day_place_key, 0) + 1
-        dp_target = target_by_day_place.get(day_place_key, 0)
-        dp_overflow = max(0, dp_after - dp_target)
+        session_key = candidate["session_id"] or f'{candidate["date"]}#{candidate["place_id"]}#{candidate["division"]}#{candidate["chave"]}'
+        session_after = session_load.get(session_key, 0) + 1
+        session_capacity = max(1, normalize_int(candidate.get("rounds", 1), 1))
+        session_ratio = session_after / session_capacity
 
+        dp_key = (candidate["date"], candidate["place_id"])
+        dp_after = date_place_load.get(dp_key, 0) + 1
         date_after = date_load.get(candidate["date"], 0) + 1
-        date_target = target_by_date.get(candidate["date"], 0)
-        date_overflow = max(0, date_after - date_target)
 
         p1 = pair["player1_id"]
         p2 = pair["player2_id"]
-        p1_current = player_day_load(p1, candidate["date"])
-        p2_current = player_day_load(p2, candidate["date"])
-        p1_after = p1_current + 1
-        p2_after = p2_current + 1
+        p1_after = player_day_load(p1, candidate["date"]) + 1
+        p2_after = player_day_load(p2, candidate["date"]) + 1
         p1_target = target_by_player_date.get(p1, {}).get(candidate["date"], 0)
         p2_target = target_by_player_date.get(p2, {}).get(candidate["date"], 0)
         player_overflow = max(0, p1_after - p1_target) + max(0, p2_after - p2_target)
 
-        p1_min = min(player_date_load.get(p1, {}).get(d, 0) for d in date_keys)
-        p2_min = min(player_date_load.get(p2, {}).get(d, 0) for d in date_keys)
-        player_balance = (p1_after - p1_min) + (p2_after - p2_min)
+        p1_loads = list(player_date_load.get(p1, {}).values()) or [0]
+        p2_loads = list(player_date_load.get(p2, {}).values()) or [0]
+        player_balance = (p1_after - min(p1_loads)) + (p2_after - min(p2_loads))
 
-        # Troca de local no mesmo dia é permitida apenas quando não há opção melhor.
-        # A regra de tempo mínimo para deslocamento é garantida por player_available().
         travel = travel_penalty(p1, candidate["date"], candidate["place_id"], player_schedule)
         travel += travel_penalty(p2, candidate["date"], candidate["place_id"], player_schedule)
 
         return (
-            dp_overflow,                  # tenta manter data/local dentro da meta
-            player_overflow,              # tenta dividir jogos de cada jogador entre os dias
-            travel,                       # evita deslocamento de local no mesmo dia
-            date_overflow,                # evita concentrar tudo em um dia
-            player_balance,               # prefere o dia em que os jogadores jogaram menos
-            date_place_load.get(day_place_key, 0),
-            date_load.get(candidate["date"], 0),
-            p1_current + p2_current,
+            player_overflow,
+            travel,
+            session_ratio,
+            player_balance,
+            dp_after,
+            date_after,
             candidate["start"],
-            candidate["date"],
-            candidate["place_name"],
-            rng.random(),                 # desempate aleatório
+            rng.random(),
         )
 
     for pair in pairs:
         previous = previous_by_pair.get(pair["pair_key"])
         best = None
         for candidate in candidates:
-            slot_key = (candidate["date"], candidate["time"], candidate["place_id"])
+            if candidate["division"] != pair["division"] or candidate["chave"] != pair["chave"]:
+                continue
+            slot_key = (candidate["date"], candidate["start"], candidate["place_id"])
             if slot_key in occupied_slots:
                 continue
-
-            p1_ok = player_available(
-                pair["player1_id"],
-                candidate["date"],
-                candidate["start"],
-                candidate["end"],
-                candidate["place_id"],
-                player_schedule,
-            )
-            p2_ok = player_available(
-                pair["player2_id"],
-                candidate["date"],
-                candidate["start"],
-                candidate["end"],
-                candidate["place_id"],
-                player_schedule,
-            )
+            p1_ok = player_available(pair["player1_id"], candidate["date"], candidate["start"], candidate["end"], candidate["place_id"], player_schedule)
+            p2_ok = player_available(pair["player2_id"], candidate["date"], candidate["start"], candidate["end"], candidate["place_id"], player_schedule)
             if not (p1_ok and p2_ok):
                 continue
-
             candidate_score = score_candidate(pair, candidate)
             if not best or candidate_score < best[0]:
                 best = (candidate_score, candidate)
@@ -585,9 +706,11 @@ def generate_schedule():
             continue
 
         candidate = best[1]
-        day_place_key = (candidate["date"], candidate["place_id"])
-        occupied_slots.add((candidate["date"], candidate["time"], candidate["place_id"]))
-        date_place_load[day_place_key] = date_place_load.get(day_place_key, 0) + 1
+        session_key = candidate["session_id"] or f'{candidate["date"]}#{candidate["place_id"]}#{candidate["division"]}#{candidate["chave"]}'
+        occupied_slots.add((candidate["date"], candidate["start"], candidate["place_id"]))
+        session_load[session_key] = session_load.get(session_key, 0) + 1
+        dp_key = (candidate["date"], candidate["place_id"])
+        date_place_load[dp_key] = date_place_load.get(dp_key, 0) + 1
         date_load[candidate["date"]] = date_load.get(candidate["date"], 0) + 1
 
         for pid in [pair["player1_id"], pair["player2_id"]]:
@@ -597,8 +720,7 @@ def generate_schedule():
                 "end": candidate["end"],
                 "place_id": candidate["place_id"],
             })
-            player_date_load.setdefault(pid, {d: 0 for d in date_keys})
-            player_date_load[pid][candidate["date"]] = player_date_load[pid].get(candidate["date"], 0) + 1
+            player_date_load.setdefault(pid, {})[candidate["date"]] = player_date_load.setdefault(pid, {}).get(candidate["date"], 0) + 1
 
         match_id = previous.get("match_id") if previous else make_id("match")
         item = {
@@ -613,10 +735,13 @@ def generate_schedule():
             "duration_minutes": duration,
             "place_id": candidate["place_id"],
             "place_name": candidate["place_name"],
+            "session_id": candidate.get("session_id", ""),
+            "round_index": candidate.get("round_index", 0),
             "winner_id": previous.get("winner_id") if previous else "",
             "balls_p1": normalize_int(previous.get("balls_p1", 0), 0, 0, 7) if previous else 0,
             "balls_p2": normalize_int(previous.get("balls_p2", 0), 0, 0, 7) if previous else 0,
             "is_finished": bool(previous.get("is_finished")) if previous else False,
+            "manual_schedule": False,
             "created_at": previous.get("created_at") if previous else now_iso(),
         }
         put_item(item)
@@ -636,20 +761,25 @@ def generate_schedule():
             "end_time": "",
             "duration_minutes": duration,
             "place_id": "",
-            "place_name": "Sem horário disponível",
+            "place_name": "Pendente — falta agenda para esta divisão/chave",
+            "session_id": "",
+            "round_index": 0,
             "winner_id": previous.get("winner_id") if previous else "",
             "balls_p1": normalize_int(previous.get("balls_p1", 0), 0, 0, 7) if previous else 0,
             "balls_p2": normalize_int(previous.get("balls_p2", 0), 0, 0, 7) if previous else 0,
             "is_finished": bool(previous.get("is_finished")) if previous else False,
+            "manual_schedule": False,
             "created_at": previous.get("created_at") if previous else now_iso(),
         }
         put_item(item)
 
+    preserved_finished = len([m for m in fixed_finished_matches if m.get("pair_key") in current_pair_keys])
     return {
         "created": len(scheduled_items),
         "unscheduled": len(unscheduled),
+        "preserved_finished": preserved_finished,
         "seed": seed,
-        "message": "Calendário recalculado com divisão equilibrada por data/local e por jogador.",
+        "message": "Calendário recalculado por agendas de local/chave. Jogos finalizados foram preservados; jogos sem agenda suficiente ficaram pendentes.",
     }
 
 def calculate_standings(players, matches, config):
@@ -660,6 +790,7 @@ def calculate_standings(players, matches, config):
             "player_id": pid,
             "name": p.get("name", ""),
             "division": normalize_int(p.get("division"), 1),
+            "chave": normalize_chave(p.get("chave", "A")),
             "played": 0,
             "wins": 0,
             "losses": 0,
@@ -694,32 +825,37 @@ def calculate_standings(players, matches, config):
             p2["points"] += 3
             p1["losses"] += 1
 
-    grouped = {str(d): [] for d in range(1, config["division_count"] + 1)}
+    grouped = {str(d): {} for d in range(1, config["division_count"] + 1)}
     for row in table.values():
         row["balls_balance"] = row["balls_for"] - row["balls_against"]
-        grouped.setdefault(str(row["division"]), []).append(row)
+        division_key = str(row["division"])
+        chave = normalize_chave(row.get("chave", "A"))
+        grouped.setdefault(division_key, {}).setdefault(chave, []).append(row)
 
     rules = config.get("rules", {}) or {}
-    for division_str, rows in grouped.items():
+    for division_str, chaves in grouped.items():
         division = normalize_int(division_str, 1)
-        rows.sort(key=lambda r: (-r["points"], -r["balls_balance"], -r["balls_for"], -r["wins"], r["name"].lower()))
         rule = rules.get(str(division), {})
-        promotion_count = normalize_int(rule.get("promotion_count", 0), 0, 0, 100) if division > 1 else 0
-        relegation_count = normalize_int(rule.get("relegation_count", 0), 0, 0, 100) if division < config["division_count"] else 0
-        if promotion_count:
-            for row in rows[:promotion_count]:
-                row["rank_status"] = "promotion"
-        if relegation_count:
-            for row in rows[-relegation_count:]:
-                if row["rank_status"] != "promotion":
-                    row["rank_status"] = "relegation"
+        # Mesmo na primeira divisão, o campo "Sobem" pode ser usado para pintar de verde.
+        # Mesmo na última divisão, o campo "Caem" pode ser usado para pintar de vermelho.
+        promotion_count = normalize_int(rule.get("promotion_count", 0), 0, 0, 100)
+        relegation_count = normalize_int(rule.get("relegation_count", 0), 0, 0, 100)
+        for chave, rows in chaves.items():
+            rows.sort(key=lambda r: (-r["points"], -r["balls_balance"], -r["balls_for"], -r["wins"], r["name"].lower()))
+            if promotion_count:
+                for row in rows[:promotion_count]:
+                    row["rank_status"] = "promotion"
+            if relegation_count:
+                for row in rows[-relegation_count:]:
+                    if row["rank_status"] != "promotion":
+                        row["rank_status"] = "relegation"
     return grouped
-
 
 def public_state():
     config = get_config()
     players = get_players()
     places = get_places()
+    sessions = get_sessions()
     dates = get_dates()
     matches = get_matches()
     standings = calculate_standings(players, matches, config)
@@ -728,6 +864,7 @@ def public_state():
         "players": players,
         "places": places,
         "dates": dates,
+        "sessions": sessions,
         "matches": matches,
         "standings": standings,
     }
@@ -774,7 +911,7 @@ def set_match_schedule(data):
 
     registered_dates = {str(d.get("date")) for d in get_dates()}
     if date not in registered_dates:
-        raise ValueError("Cadastre essa data na seção Datas antes de usar na partida.")
+        raise ValueError("Cadastre uma agenda com essa data antes de usar na partida.")
 
     config = get_config()
     duration = normalize_int(match.get("duration_minutes", config.get("duration_minutes", 30)), config.get("duration_minutes", 30), 5, 240)
@@ -857,6 +994,9 @@ def setup_tournament(data):
     for player in data.get("players", []):
         if isinstance(player, dict):
             upsert_player(player)
+    for session in data.get("sessions", []):
+        if isinstance(session, dict):
+            upsert_session(session)
     result = generate_schedule()
     return {"config": config, "schedule": result, "state": public_state()}
 
@@ -880,6 +1020,9 @@ def handle_admin_mutation(event, action):
         if action == "date":
             item = upsert_date(data)
             return response(200, {"date": item})
+        if action == "session":
+            item = upsert_session(data)
+            return response(200, {"session": item})
         if action == "delete-player":
             delete_item("PLAYER", str(data.get("player_id", "")))
             return response(200, {"ok": True})
@@ -888,6 +1031,9 @@ def handle_admin_mutation(event, action):
             return response(200, {"ok": True})
         if action == "delete-date":
             delete_item("DATE", str(data.get("date_id", "")))
+            return response(200, {"ok": True})
+        if action == "delete-session":
+            delete_item("SESSION", str(data.get("session_id", "")))
             return response(200, {"ok": True})
         if action == "recalculate":
             result = generate_schedule()

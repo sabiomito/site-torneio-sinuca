@@ -16,30 +16,53 @@ Depois da configuração inicial, qualquer alteração feita por commit na branc
 
 ## O que já está implementado
 
-- Página inicial pública com placar por divisão.
+- Página inicial pública com placar por divisão e por chave.
 - Link do jogador para ver partidas dele.
 - Lista pública de jogos por data e local.
-- Filtros no público e no admin por data, local, competidor e divisão.
+- Filtros no público e no admin por data, local, competidor, divisão e chave.
 - Admin protegido por senha.
 - Criação completa do torneio com quantidade de divisões configurável.
-- Jogadores por divisão.
+- Jogadores por divisão e por chave.
 - Locais de jogo.
-- Datas com horário inicial por data.
+- Agendas por data, horário inicial, local, divisão, chave e quantidade de rodadas.
 - Tempo estimado por partida, padrão 30 minutos.
 - Recalcular calendário sem precisar recriar tudo.
-- Todos contra todos dentro de cada divisão.
+- Todos contra todos apenas dentro da mesma divisão e da mesma chave.
 - Sorteio aleatório dos confrontos a cada recalculo, usando seed baseada no timestamp.
-- Distribuição equilibrada das partidas entre datas e locais cadastrados.
-- Distribuição equilibrada das partidas de cada jogador entre os dias do torneio, dentro do possível.
+- Os jogos são encaixados apenas nas agendas correspondentes à sua divisão/chave.
+- Se faltarem rodadas/agendas, os jogos restantes ficam pendentes até cadastrar nova agenda e recalcular.
+- Jogos já finalizados não são remarcados pelo recalculo.
+- Distribuição equilibrada das partidas de cada jogador entre os dias disponíveis da sua chave, dentro do possível.
 - Evita jogador em dois jogos ao mesmo tempo.
 - Evita deslocamento entre locais no mesmo dia, exceto se houver pelo menos 30 minutos depois do fim da partida anterior.
 - Vitória vale 3 pontos.
 - Ao escolher vencedor, o vencedor recebe automaticamente 7 bolas.
 - Saldo de bolas é usado como desempate.
-- Configuração de promovidos e rebaixados por divisão.
-- Linhas verdes para quem sobe e vermelhas para quem cai.
-- Seções recolhíveis no admin.
+- Configuração de linhas verdes e vermelhas por divisão, inclusive na primeira e na última divisão.
+- Linhas verdes para os primeiros colocados configurados e vermelhas para os últimos configurados em cada chave.
+- Seções recolhíveis no admin, começando colapsadas.
 - Ao salvar resultado, a tela não volta para o topo.
+
+
+## Como cadastrar agendas
+
+As partidas não usam mais datas genéricas. Cada agenda precisa informar exatamente onde aquela chave vai jogar:
+
+```text
+Data + horário inicial + local + divisão + chave + rodadas
+```
+
+Exemplo no campo de criação completa do torneio:
+
+```text
+2026-06-10 09:00 | Mesa 1 | 1 | A | 4
+2026-06-10 13:00 | Mesa 2 | 1 | B | 4
+2026-06-11 09:00 | Mesa 1 | 2 | A | 3
+```
+
+Isso significa que, na primeira linha, a 1ª Divisão / Chave A terá 4 horários sequenciais na Mesa 1 a partir de 09:00. Se a duração estiver em 30 minutos, serão 09:00, 09:30, 10:00 e 10:30.
+
+Jogos que não couberem nas agendas cadastradas ficam pendentes. Para resolver, cadastre mais agendas e clique em **Recalcular calendário**.
 
 ---
 
