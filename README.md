@@ -88,3 +88,12 @@ Em **Settings > Secrets and variables > Actions > Secrets**:
 ADMIN_PASSWORD
 SECRET_KEY
 ```
+
+## Alterações da versão v8
+
+- A tela pública não mostra mais a legenda antiga; no lugar foi adicionada a imagem de propaganda em `frontend/img/banner-tacos-sinuca.png`.
+- No placar, a coluna Situação agora mostra `Classificado` e `Rebaixado`.
+- O botão `Atualizar pelo admin` foi removido do card do placar geral, mantendo apenas o link `Admin` no topo.
+- A montagem manual da rodada agora usa linhas de jogos: um combobox à esquerda, um `x` no meio e outro combobox à direita.
+- Ao escolher um competidor em qualquer combobox da rodada manual, ele deixa de aparecer nos outros combobox da mesma rodada.
+- Os cards colapsáveis do admin continuam começando fechados após login.

@@ -54,9 +54,9 @@ function renderStandingsTable(rows) {
   </tr></thead><tbody>`;
   rows.forEach((row, idx) => {
     const statusLabel = row.rank_status === 'promotion'
-      ? '<span class="badge win">Verde</span>'
+      ? '<span class="badge win">Classificado</span>'
       : row.rank_status === 'relegation'
-        ? '<span class="badge loss">Vermelho</span>'
+        ? '<span class="badge loss">Rebaixado</span>'
         : '<span class="muted">—</span>';
     html += `<tr class="${escapeHtml(row.rank_status)}">
       <td>${idx + 1}</td>

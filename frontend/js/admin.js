@@ -21,6 +21,10 @@ function preserveScroll(fn) {
   return result;
 }
 
+function collapseAllAdminCards() {
+  document.querySelectorAll('#admin-panel .collapsible').forEach(card => card.classList.add('closed'));
+}
+
 function normalizeChave(value) {
   return String(value || 'A').trim().toUpperCase() || 'A';
 }
@@ -83,6 +87,7 @@ async function loadAdminState() {
     els.adminPanel.classList.remove('hidden');
     els.logout.classList.remove('hidden');
     renderAll();
+    collapseAllAdminCards();
   } catch (err) {
     clearToken();
     els.loginCard.classList.remove('hidden');
@@ -262,38 +267,88 @@ async function addAutomaticRound() {
 function prepareManualRound() {
   const {players} = validateRoundBaseFields();
   const editor = document.getElementById('manual-round-editor');
-  const options = players.map(p => `<option value="${escapeHtml(p.player_id)}">${escapeHtml(p.name)}</option>`).join('');
+  const sortedPlayers = [...players].sort((a, b) => String(a.name).localeCompare(String(b.name), 'pt-BR'));
+  const gameCount = Math.floor(sortedPlayers.length / 2);
+  const byeText = sortedPlayers.length % 2 === 1 ? 'Como a chave tem quantidade ímpar, 1 jogador ficará de folga nesta rodada.' : 'Todos os jogadores da chave precisam aparecer exatamente uma vez.';
+
   editor.innerHTML = `<h3>Montar rodada manual</h3>
-    <p class="muted">Escolha o adversário de cada jogador. Cada jogador só pode aparecer em um confronto. Se a chave tiver quantidade ímpar, um jogador ficará de folga.</p>
-    <div class="manual-pair-list">${players.map(p => `<div class="manual-pair-row" data-player-id="${escapeHtml(p.player_id)}">
-      <strong>${escapeHtml(p.name)}</strong>
-      <select class="manual-opponent"><option value="">Folga / já escolhido</option>${options}</select>
+    <p class="muted">Monte os confrontos da rodada. Cada linha é um jogo: escolha um competidor na esquerda e outro na direita. ${escapeHtml(byeText)}</p>
+    <div class="manual-pair-list">${Array.from({length: gameCount}).map((_, idx) => `<div class="manual-game-row" data-game-index="${idx}">
+      <span class="manual-game-label">Jogo ${idx + 1}</span>
+      <select class="manual-player manual-left" data-side="left"></select>
+      <span class="manual-versus">x</span>
+      <select class="manual-player manual-right" data-side="right"></select>
     </div>`).join('')}</div>
+    <div class="manual-bye-box" id="manual-bye-box"></div>
     <div class="actions-row"><button type="button" id="save-manual-round">Salvar rodada manual</button><button type="button" class="secondary" id="cancel-manual-round">Cancelar</button></div>`;
   editor.classList.remove('hidden');
-  editor.querySelectorAll('.manual-pair-row').forEach(row => {
-    const select = row.querySelector('select');
-    [...select.options].forEach(opt => {
-      if (opt.value === row.dataset.playerId) opt.remove();
+
+  const selects = [...editor.querySelectorAll('.manual-player')];
+
+  function selectedIds(exceptSelect = null) {
+    return new Set(selects.filter(sel => sel !== exceptSelect).map(sel => sel.value).filter(Boolean));
+  }
+
+  function refreshManualOptions() {
+    selects.forEach(select => {
+      const current = select.value;
+      const blocked = selectedIds(select);
+      select.innerHTML = '<option value="">Selecione</option>';
+      sortedPlayers.forEach(player => {
+        if (!blocked.has(player.player_id) || player.player_id === current) {
+          const selected = player.player_id === current ? 'selected' : '';
+          select.insertAdjacentHTML('beforeend', `<option value="${escapeHtml(player.player_id)}" ${selected}>${escapeHtml(player.name)}</option>`);
+        }
+      });
+      if (current && ![...select.options].some(opt => opt.value === current)) {
+        select.value = '';
+      }
     });
-  });
+
+    const used = new Set(selects.map(sel => sel.value).filter(Boolean));
+    const freePlayers = sortedPlayers.filter(player => !used.has(player.player_id));
+    const byeBox = document.getElementById('manual-bye-box');
+    if (!byeBox) return;
+    if (freePlayers.length) {
+      byeBox.innerHTML = `<strong>Sem jogo nesta rodada:</strong> ${freePlayers.map(p => escapeHtml(p.name)).join(', ')}`;
+    } else {
+      byeBox.innerHTML = '<strong>Todos os jogadores já foram usados nesta rodada.</strong>';
+    }
+  }
+
+  selects.forEach(select => select.addEventListener('change', refreshManualOptions));
+  refreshManualOptions();
+
   document.getElementById('cancel-manual-round').addEventListener('click', () => editor.classList.add('hidden'));
-  document.getElementById('save-manual-round').addEventListener('click', saveManualRound);
+  document.getElementById('save-manual-round').addEventListener('click', async () => {
+    try { await saveManualRound(); } catch (err) { toast(err.message); }
+  });
 }
 
 async function saveManualRound() {
-  const {base} = validateRoundBaseFields();
+  const {base, players} = validateRoundBaseFields();
+  const playerIds = new Set(players.map(p => p.player_id));
   const pairs = [];
-  const seenPairs = new Set();
-  document.querySelectorAll('.manual-pair-row').forEach(row => {
-    const p1 = row.dataset.playerId;
-    const p2 = row.querySelector('.manual-opponent').value;
-    if (!p1 || !p2 || p1 === p2) return;
-    const key = [p1, p2].sort().join('#');
-    if (seenPairs.has(key)) return;
-    seenPairs.add(key);
-    pairs.push({player1_id: p1, player2_id: p2});
+  const used = new Set();
+
+  document.querySelectorAll('.manual-game-row').forEach(row => {
+    const left = row.querySelector('.manual-left').value;
+    const right = row.querySelector('.manual-right').value;
+    if (!left && !right) return;
+    if (!left || !right) throw new Error('Preencha os dois lados de cada jogo manual.');
+    if (left === right) throw new Error('Um jogador não pode enfrentar ele mesmo.');
+    if (!playerIds.has(left) || !playerIds.has(right)) throw new Error('Existe jogador fora da chave selecionada.');
+    if (used.has(left) || used.has(right)) throw new Error('Cada jogador só pode aparecer uma vez na rodada.');
+    used.add(left);
+    used.add(right);
+    pairs.push({player1_id: left, player2_id: right});
   });
+
+  const expectedGames = Math.floor(players.length / 2);
+  if (pairs.length !== expectedGames) {
+    throw new Error(`Esta chave precisa de ${expectedGames} jogo(s) nesta rodada.`);
+  }
+
   const data = await adminFetch('/admin/round-manual', {method: 'POST', body: JSON.stringify(Object.assign({}, base, {pairs}))});
   adminState = data.state || await adminFetch('/admin/state');
   document.getElementById('manual-round-editor').classList.add('hidden');

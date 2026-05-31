@@ -341,3 +341,39 @@ tr.relegation td:first-child, .rank-relegation td:first-child { border-left: 4px
 @media (max-width: 850px) {
   .grid-6, .round-form, .player-form, .manual-pair-row { grid-template-columns: 1fr; }
 }
+
+.ad-banner-card {
+  overflow: hidden;
+  border-radius: 24px;
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  background: rgba(0,0,0,.28);
+  margin-bottom: 22px;
+}
+.ad-banner-img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.manual-game-row {
+  display: grid;
+  grid-template-columns: auto minmax(180px, 1fr) auto minmax(180px, 1fr);
+  gap: 10px;
+  align-items: center;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 12px;
+  padding: 10px;
+}
+.manual-game-label { color: var(--muted); font-weight: 800; white-space: nowrap; }
+.manual-versus { color: var(--accent); font-weight: 900; text-align: center; }
+.manual-bye-box {
+  margin: 12px 0;
+  color: var(--muted);
+  border: 1px dashed rgba(255,255,255,.14);
+  border-radius: 12px;
+  padding: 10px;
+}
+@media (max-width: 850px) {
+  .manual-game-row { grid-template-columns: 1fr; }
+  .manual-versus { text-align: left; }
+}
