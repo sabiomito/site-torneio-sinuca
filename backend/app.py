@@ -260,6 +260,13 @@ def make_id(prefix):
     return prefix + "_" + uuid.uuid4().hex[:12]
 
 
+class RoundConflictError(ValueError):
+    def __init__(self, conflicts):
+        self.conflicts = conflicts
+        message = "Alguns confrontos da rodada manual já aconteceram ou já estão cadastrados."
+        super().__init__(message)
+
+
 def build_pair_key(division, chave, p1_id, p2_id):
     ordered = sorted([str(p1_id), str(p2_id)])
     return f"D{normalize_int(division, 1)}#K{normalize_chave(chave)}#{ordered[0]}#{ordered[1]}"
@@ -379,16 +386,40 @@ def group_players(players):
     return grouped
 
 
-def get_used_pair_keys(include_pending=True):
-    used = set()
+def get_used_pair_map(include_pending=True):
+    used = {}
     for m in get_matches():
-        pair_key = m.get("pair_key") or build_pair_key(m.get("division"), m.get("chave"), m.get("player1_id"), m.get("player2_id"))
+        pair_key = str(m.get("pair_key") or build_pair_key(m.get("division"), m.get("chave"), m.get("player1_id"), m.get("player2_id")))
         if include_pending or m.get("is_finished"):
-            used.add(str(pair_key))
+            status = "já aconteceu" if m.get("is_finished") else "já está cadastrado"
+            used[pair_key] = {
+                "pair_key": pair_key,
+                "player1_id": m.get("player1_id"),
+                "player1_name": m.get("player1_name"),
+                "player2_id": m.get("player2_id"),
+                "player2_name": m.get("player2_name"),
+                "status": status,
+                "round_name": m.get("round_name") or m.get("place_name") or "",
+                "date": m.get("date") or "",
+            }
     for r in get_results():
         if r.get("pair_key"):
-            used.add(str(r.get("pair_key")))
+            pair_key = str(r.get("pair_key"))
+            used[pair_key] = {
+                "pair_key": pair_key,
+                "player1_id": r.get("player1_id"),
+                "player1_name": r.get("player1_name"),
+                "player2_id": r.get("player2_id"),
+                "player2_name": r.get("player2_name"),
+                "status": "já aconteceu",
+                "round_name": r.get("round_name") or "resultado salvo",
+                "date": r.get("date") or "",
+            }
     return used
+
+
+def get_used_pair_keys(include_pending=True):
+    return set(get_used_pair_map(include_pending=include_pending).keys())
 
 
 def all_pair_keys_for_group(group_players_list, division, chave):
@@ -427,6 +458,11 @@ def round_requirements(config, players, rounds, matches, results):
             remaining_pairs = max(0, total_pairs - done_or_scheduled)
             per_round = matches_per_round(len(ps))
             missing_rounds = 0 if per_round == 0 else (remaining_pairs + per_round - 1) // per_round
+            complete_rounds_remaining = 0 if per_round == 0 else remaining_pairs // per_round
+            partial_round_games = 0 if per_round == 0 else remaining_pairs % per_round
+            games_missing_to_full_round = 0
+            if per_round and partial_round_games:
+                games_missing_to_full_round = per_round - partial_round_games
             created_rounds = [r for r in rounds if normalize_int(r.get("division"), 1) == division and normalize_chave(r.get("chave", "A")) == chave]
             reqs.append({
                 "division": division,
@@ -439,9 +475,11 @@ def round_requirements(config, players, rounds, matches, results):
                 "total_rounds_needed": total_rounds_needed(len(ps)),
                 "created_rounds": len(created_rounds),
                 "missing_rounds": missing_rounds,
+                "complete_rounds_remaining": complete_rounds_remaining,
+                "partial_round_games": partial_round_games,
+                "games_missing_to_full_round": games_missing_to_full_round,
             })
     return reqs
-
 
 def upsert_player(data):
     name = str(data.get("name", "")).strip()
@@ -594,37 +632,60 @@ def create_round(data, manual=False):
     if len(players) < 2:
         raise ValueError("Essa divisão/chave precisa ter pelo menos 2 competidores.")
 
-    used_pairs = get_used_pair_keys(include_pending=True)
+    used_pair_map = get_used_pair_map(include_pending=True)
+    used_pairs = set(used_pair_map.keys())
     seed = time.time_ns()
+    skipped_conflicts = []
     if manual:
         raw_pairs = data.get("pairs") or []
+        confirm_skip_existing = bool(data.get("confirm_skip_existing"))
         player_by_id = {p["player_id"]: p for p in players}
         pairs = []
         involved = set()
         seen_this_round = set()
+        requested_valid_pairs = 0
         for raw in raw_pairs:
             p1_id = str(raw.get("player1_id") or "")
             p2_id = str(raw.get("player2_id") or "")
-            if not p1_id or not p2_id or p1_id == p2_id:
+            if not p1_id and not p2_id:
                 continue
+            if not p1_id or not p2_id or p1_id == p2_id:
+                raise ValueError("Preencha os dois lados de cada jogo manual e não repita o mesmo jogador no confronto.")
             if p1_id not in player_by_id or p2_id not in player_by_id:
                 raise ValueError("A rodada manual contém jogador fora da divisão/chave selecionada.")
-            pair_key = build_pair_key(base["division"], base["chave"], p1_id, p2_id)
-            if pair_key in seen_this_round:
-                continue
-            if pair_key in used_pairs:
-                raise ValueError(f"O confronto {player_by_id[p1_id]['name']} x {player_by_id[p2_id]['name']} já aconteceu ou já está cadastrado.")
             if p1_id in involved or p2_id in involved:
                 raise ValueError("Na mesma rodada, cada jogador só pode aparecer em um confronto.")
             involved.add(p1_id)
             involved.add(p2_id)
+            pair_key = build_pair_key(base["division"], base["chave"], p1_id, p2_id)
+            if pair_key in seen_this_round:
+                raise ValueError("O mesmo confronto foi escolhido mais de uma vez nessa rodada.")
             seen_this_round.add(pair_key)
+            requested_valid_pairs += 1
+            if pair_key in used_pairs:
+                detail = dict(used_pair_map.get(pair_key, {}))
+                detail.update({
+                    "pair_key": pair_key,
+                    "player1_id": p1_id,
+                    "player1_name": player_by_id[p1_id]["name"],
+                    "player2_id": p2_id,
+                    "player2_name": player_by_id[p2_id]["name"],
+                    "status": detail.get("status") or "já aconteceu ou já está cadastrado",
+                })
+                skipped_conflicts.append(detail)
+                continue
             pairs.append((player_by_id[p1_id], player_by_id[p2_id]))
         expected = matches_per_round(len(players))
-        if len(pairs) != expected:
+        if requested_valid_pairs != expected:
             if len(players) % 2 == 1:
                 raise ValueError(f"Essa chave precisa de {expected} confronto(s) nessa rodada, com 1 jogador de folga.")
             raise ValueError(f"Essa chave precisa de {expected} confronto(s) nessa rodada.")
+        if skipped_conflicts and not confirm_skip_existing:
+            raise RoundConflictError(skipped_conflicts)
+        if not pairs:
+            if skipped_conflicts:
+                raise ValueError("Todos os jogos escolhidos já aconteceram ou já estão cadastrados. Nenhuma partida nova foi criada.")
+            raise ValueError("Informe pelo menos um confronto válido para criar a rodada manual.")
     else:
         pairs = find_automatic_pairs(players, base["division"], base["chave"], used_pairs, seed)
         if not pairs:
@@ -655,7 +716,33 @@ def create_round(data, manual=False):
         match = build_match_item(round_item, p1, p2, idx)
         put_item(match)
         matches.append(match)
-    return {"round": round_item, "matches": matches, "created": len(matches)}
+    return {"round": round_item, "matches": matches, "created": len(matches), "skipped_conflicts": skipped_conflicts, "skipped": len(skipped_conflicts)}
+
+
+def update_round_name(data):
+    round_id = str(data.get("round_id") or "")
+    name = str(data.get("name") or "").strip()
+    if not round_id:
+        raise ValueError("Rodada não informada.")
+    if not name:
+        raise ValueError("Informe o novo nome/local da rodada.")
+    round_item = get_item("ROUND", round_id)
+    if not round_item:
+        raise ValueError("Rodada não encontrada.")
+    place_id = "round_place_" + hashlib.sha1(name.lower().encode("utf-8")).hexdigest()[:10]
+    round_item["name"] = name
+    round_item["place_id"] = place_id
+    round_item["place_name"] = name
+    put_item(round_item)
+    updated_matches = 0
+    for match in get_matches():
+        if str(match.get("round_id")) == round_id:
+            match["round_name"] = name
+            match["place_id"] = place_id
+            match["place_name"] = name
+            put_item(match)
+            updated_matches += 1
+    return {"round": round_item, "updated_matches": updated_matches}
 
 
 def delete_round(round_id):
@@ -842,6 +929,9 @@ def handle_admin_mutation(event, action):
         if action == "delete-round":
             result = delete_round(data.get("round_id"))
             return response(200, {**result, "state": public_state()})
+        if action == "update-round":
+            result = update_round_name(data)
+            return response(200, {**result, "state": public_state()})
         if action == "result":
             item = set_match_result(data)
             return response(200, {"match": item, "state": public_state()})
@@ -850,6 +940,8 @@ def handle_admin_mutation(event, action):
                 raise ValueError("Digite LIMPAR para confirmar a limpeza definitiva do torneio.")
             clear_all_data(keep_reset_marker=True)
             return response(200, {"ok": True, "state": public_state()})
+    except RoundConflictError as exc:
+        return response(409, {"error": str(exc), "conflicts": exc.conflicts, "requires_confirmation": True})
     except ValueError as exc:
         return response(400, {"error": str(exc)})
     except Exception as exc:

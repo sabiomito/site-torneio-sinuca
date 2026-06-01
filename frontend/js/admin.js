@@ -170,13 +170,20 @@ function renderRoundRequirements() {
     container.innerHTML = '<div class="empty">Configure as divisões e cadastre competidores para calcular as rodadas faltantes.</div>';
     return;
   }
-  container.innerHTML = `<h3>Rodadas faltantes por divisão/chave</h3><div class="requirement-grid">${adminState.round_requirements.map(req => {
+  container.innerHTML = `<h3>Status de rodadas por divisão/chave</h3><div class="requirement-grid">${adminState.round_requirements.map(req => {
     const cls = req.missing_rounds > 0 ? 'pending-box' : 'done-box';
+    const partial = Number(req.partial_round_games || 0);
+    const perRound = Number(req.matches_per_round || 0);
+    const partialText = partial > 0
+      ? `<span>Rodada incompleta pendente: ${partial} de ${perRound} jogo(s). Faltam ${req.games_missing_to_full_round || 0} jogo(s) para uma rodada cheia.</span>`
+      : '';
     return `<div class="requirement-card ${cls}">
       <strong>${divisionName(req.division)} · Chave ${escapeHtml(req.chave)}</strong>
       <span>${req.players} jogador(es)</span>
-      <span>${req.remaining_pairs} confronto(s) restante(s)</span>
+      <span>${req.remaining_pairs} jogo(s)/confronto(s) pendente(s)</span>
+      <span>${perRound} jogo(s) por rodada cheia</span>
       <b>${req.missing_rounds} rodada(s) faltando</b>
+      ${partialText}
     </div>`;
   }).join('')}</div>`;
 }
@@ -212,13 +219,27 @@ function renderRoundsList() {
   container.innerHTML = rounds.map(r => {
     const matchCount = (adminState.matches || []).filter(m => m.round_id === r.round_id).length;
     return `<div class="list-item round-item">
-      <div>
+      <div class="round-main">
         <strong>${escapeHtml(r.name)} · ${fmtDate(r.date)} · ${escapeHtml(r.start_time || '09:00')}</strong>
         <div class="match-meta">${divisionName(r.division)} · Chave ${escapeHtml(normalizeChave(r.chave))} · Rodada ${r.round_number || '-'} · ${r.mode === 'manual' ? 'manual' : 'automática'} · ${matchCount} jogo(s)</div>
+        <div class="round-edit-line">
+          <input type="text" data-round-name-input="${escapeHtml(r.round_id)}" value="${escapeHtml(r.name)}" aria-label="Novo nome da rodada">
+          <button class="small secondary" data-update-round="${escapeHtml(r.round_id)}">Salvar nome</button>
+        </div>
       </div>
       <button class="small danger" data-delete-round="${escapeHtml(r.round_id)}">Excluir rodada</button>
     </div>`;
   }).join('');
+  container.querySelectorAll('[data-update-round]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const input = container.querySelector(`[data-round-name-input="${btn.dataset.updateRound}"]`);
+      const name = input ? input.value : '';
+      const data = await adminFetch('/admin/update-round', {method: 'POST', body: JSON.stringify({round_id: btn.dataset.updateRound, name})});
+      adminState = data.state || await adminFetch('/admin/state');
+      preserveScroll(renderAll);
+      toast('Nome da rodada atualizado.');
+    });
+  });
   container.querySelectorAll('[data-delete-round]').forEach(btn => {
     btn.addEventListener('click', async () => {
       if (!confirm('Excluir esta rodada? Partidas pendentes serão removidas. Resultados já salvos ficam preservados.')) return;
@@ -325,6 +346,26 @@ function prepareManualRound() {
   });
 }
 
+function manualConflictMessage(conflicts) {
+  const lines = (conflicts || []).map((item, idx) => {
+    const p1 = item.player1_name || 'Jogador 1';
+    const p2 = item.player2_name || 'Jogador 2';
+    const status = item.status || 'já aconteceu ou já está cadastrado';
+    const detail = [item.round_name, item.date ? fmtDate(item.date) : ''].filter(Boolean).join(' · ');
+    return `${idx + 1}. ${p1} x ${p2} — ${status}${detail ? ` (${detail})` : ''}`;
+  }).join('\n');
+  return `Alguns jogos escolhidos já aconteceram ou já estão cadastrados:\n\n${lines}\n\nDeseja criar a rodada mesmo assim, sem esses jogos?`;
+}
+
+async function submitManualRoundPayload(payload) {
+  const data = await adminFetch('/admin/round-manual', {method: 'POST', body: JSON.stringify(payload)});
+  adminState = data.state || await adminFetch('/admin/state');
+  document.getElementById('manual-round-editor').classList.add('hidden');
+  preserveScroll(renderAll);
+  const skipped = Number(data.skipped || 0);
+  toast(`Rodada manual criada com ${data.created || 0} jogo(s)${skipped ? `; ${skipped} jogo(s) ignorado(s)` : ''}.`);
+}
+
 async function saveManualRound() {
   const {base, players} = validateRoundBaseFields();
   const playerIds = new Set(players.map(p => p.player_id));
@@ -349,11 +390,21 @@ async function saveManualRound() {
     throw new Error(`Esta chave precisa de ${expectedGames} jogo(s) nesta rodada.`);
   }
 
-  const data = await adminFetch('/admin/round-manual', {method: 'POST', body: JSON.stringify(Object.assign({}, base, {pairs}))});
-  adminState = data.state || await adminFetch('/admin/state');
-  document.getElementById('manual-round-editor').classList.add('hidden');
-  preserveScroll(renderAll);
-  toast(`Rodada manual criada com ${data.created || 0} jogo(s).`);
+  const payload = Object.assign({}, base, {pairs});
+  try {
+    await submitManualRoundPayload(payload);
+  } catch (err) {
+    if (err.status === 409 && err.data && err.data.requires_confirmation) {
+      const conflicts = err.data.conflicts || [];
+      if (!confirm(manualConflictMessage(conflicts))) {
+        toast('Rodada manual cancelada.');
+        return;
+      }
+      await submitManualRoundPayload(Object.assign({}, payload, {confirm_skip_existing: true}));
+      return;
+    }
+    throw err;
+  }
 }
 
 function renderAdminMatches() {

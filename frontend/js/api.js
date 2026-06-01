@@ -40,7 +40,10 @@ async function apiFetch(path, options = {}) {
     let data = {};
     try { data = text ? JSON.parse(text) : {}; } catch (_) { data = {}; }
     if (!resp.ok) {
-      throw new Error(data.error || `Erro ${resp.status}`);
+      const error = new Error(data.error || `Erro ${resp.status}`);
+      error.status = resp.status;
+      error.data = data;
+      throw error;
     }
     return data;
   } catch (err) {

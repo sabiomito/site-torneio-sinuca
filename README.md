@@ -97,3 +97,10 @@ SECRET_KEY
 - A montagem manual da rodada agora usa linhas de jogos: um combobox à esquerda, um `x` no meio e outro combobox à direita.
 - Ao escolher um competidor em qualquer combobox da rodada manual, ele deixa de aparecer nos outros combobox da mesma rodada.
 - Os cards colapsáveis do admin continuam começando fechados após login.
+
+## Alterações da versão v9
+
+- A rodada manual agora avisa quando algum confronto escolhido já aconteceu ou já está cadastrado.
+- Se o administrador confirmar, a rodada é criada ignorando apenas esses jogos conflitantes.
+- O status de rodadas mostra jogos/confrontos pendentes e informa quando a rodada pendente está incompleta.
+- É possível editar o nome/local de uma rodada já cadastrada pela lista de rodadas. A alteração também atualiza as partidas vinculadas à rodada.
