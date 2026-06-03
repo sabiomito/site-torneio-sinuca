@@ -407,8 +407,8 @@ async function saveManualRound() {
   }
 }
 
-function renderAdminMatches() {
-  const filters = {
+function currentAdminMatchFilters() {
+  return {
     date: document.getElementById('admin-filter-date').value,
     round: document.getElementById('admin-filter-round').value,
     place: document.getElementById('admin-filter-place').value,
@@ -416,7 +416,32 @@ function renderAdminMatches() {
     division: document.getElementById('admin-filter-division').value,
     chave: document.getElementById('admin-filter-chave').value,
   };
-  const matches = getFilteredMatches(adminState.matches, filters);
+}
+
+function adminOptionText(id) {
+  const el = document.getElementById(id);
+  if (!el || !el.value) return '';
+  return el.options[el.selectedIndex]?.textContent || '';
+}
+
+function currentAdminFilterDescription() {
+  const parts = [
+    adminOptionText('admin-filter-date') && `Data: ${adminOptionText('admin-filter-date')}`,
+    adminOptionText('admin-filter-round') && `Rodada: ${adminOptionText('admin-filter-round')}`,
+    adminOptionText('admin-filter-place') && `Local: ${adminOptionText('admin-filter-place')}`,
+    adminOptionText('admin-filter-player') && `Competidor: ${adminOptionText('admin-filter-player')}`,
+    adminOptionText('admin-filter-division') && `Divisão: ${adminOptionText('admin-filter-division')}`,
+    adminOptionText('admin-filter-chave') && `Chave: ${adminOptionText('admin-filter-chave')}`,
+  ].filter(Boolean);
+  return parts.length ? parts.join(' · ') : 'Todos os jogos exibidos no filtro atual';
+}
+
+function currentAdminFilteredMatches() {
+  return getFilteredMatches(adminState.matches || [], currentAdminMatchFilters());
+}
+
+function renderAdminMatches() {
+  const matches = currentAdminFilteredMatches();
   const container = document.getElementById('admin-matches');
   if (!matches.length) {
     container.innerHTML = '<div class="empty">Nenhuma partida encontrada.</div>';
@@ -553,6 +578,12 @@ function setupEvents() {
     ['admin-filter-date','admin-filter-round','admin-filter-place','admin-filter-player','admin-filter-division','admin-filter-chave'].forEach(id => document.getElementById(id).value = '');
     renderAdminMatches();
   });
+  const adminPrintButton = document.getElementById('admin-print-filtered-matches');
+  if (adminPrintButton) {
+    adminPrintButton.addEventListener('click', () => {
+      openMatchesPrintWindow(currentAdminFilteredMatches(), 'Lista de jogos do torneio', currentAdminFilterDescription());
+    });
+  }
 
   document.getElementById('clear-database').addEventListener('click', async () => {
     if (!confirm('Tem certeza que deseja limpar TODO o banco do torneio? Isso apaga tudo e não tem volta.')) return;

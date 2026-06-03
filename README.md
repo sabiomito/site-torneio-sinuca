@@ -104,3 +104,17 @@ SECRET_KEY
 - Se o administrador confirmar, a rodada é criada ignorando apenas esses jogos conflitantes.
 - O status de rodadas mostra jogos/confrontos pendentes e informa quando a rodada pendente está incompleta.
 - É possível editar o nome/local de uma rodada já cadastrada pela lista de rodadas. A alteração também atualiza as partidas vinculadas à rodada.
+
+## Alterações da versão v10
+
+- Em cada tabela pública de classificação foi adicionado um botão **Compartilhar**.
+- O botão gera uma imagem vertical 1080x1920 pronta para Instagram/Status do WhatsApp com:
+  - título `2° campeonato municipal de sinuca`;
+  - divisão e chave, quando houver mais de uma chave;
+  - posição, jogador abreviado, pontos, vitórias, jogos e saldo de bolas;
+  - linhas verdes para classificados e vermelhas para rebaixados;
+  - fundo estilizado com elementos de sinuca.
+- Ao lado de **Limpar filtros** foi adicionado o botão **Imprimir/PDF**.
+- A impressão gera uma página própria com os jogos filtrados, cerca de 24 jogos por folha.
+- Jogos com resultado aparecem preenchidos; jogos pendentes aparecem com espaço para preencher manualmente depois de impresso.
+- O botão de impressão foi adicionado na tela pública e também no admin para usar os filtros atuais de partidas.

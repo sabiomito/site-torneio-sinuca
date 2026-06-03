@@ -377,3 +377,32 @@ tr.relegation td:first-child, .rank-relegation td:first-child { border-left: 4px
   .manual-game-row { grid-template-columns: 1fr; }
   .manual-versus { text-align: left; }
 }
+
+.table-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.standings-subtitle { align-items: center; }
+.share-table-button {
+  color: #061b10;
+  background: linear-gradient(135deg, #93ff16, var(--accent));
+  border: 0;
+  box-shadow: 0 8px 24px rgba(40, 209, 124, .18);
+}
+.filter-actions-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 14px;
+}
+.print-button {
+  gap: 7px;
+}
+@media (max-width: 850px) {
+  .table-actions { justify-content: flex-start; }
+  .standings-subtitle { align-items: flex-start; }
+}
