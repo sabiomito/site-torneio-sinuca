@@ -124,3 +124,8 @@ SECRET_KEY
 
 - A imagem de compartilhamento agora usa `frontend/img/share-bg-base.png` como fundo principal.
 - A lista de impressão foi ajustada para caber corretamente em A4 com até 24 jogos por página.
+
+
+## Correção v12
+
+- Corrigido o PDF/lista de impressão: quando uma partida já tem resultado salvo, o campo central agora mostra somente o placar numérico, por exemplo `7 x 3`, sem repetir os nomes dos jogadores.

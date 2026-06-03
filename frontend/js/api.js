@@ -148,7 +148,7 @@ function matchPlainResult(match) {
 
 
 function printableMatchRow(match) {
-  const result = matchPlainResult(match);
+  const result = match.is_finished ? `${match.balls_p1 || 0} x ${match.balls_p2 || 0}` : '';
   const blank = '<span class="blank-score"></span> x <span class="blank-score"></span>';
   const roundText = `${divisionName(match.division)}${match.chave ? ` / Chave ${escapeHtml(normalizeChaveLabel(match.chave))}` : ''}${match.round_number ? ` / Rodada ${escapeHtml(match.round_number)}` : ''}`;
   return `<tr>
@@ -157,7 +157,7 @@ function printableMatchRow(match) {
     <td class="col-local">${escapeHtml(match.place_name || 'Sem local')}</td>
     <td class="col-round">${roundText}</td>
     <td class="col-player player-left"><strong>${escapeHtml(match.player1_name)}</strong></td>
-    <td class="col-result">${result ? escapeHtml(result.replace(/^.*? /,'')) : blank}</td>
+    <td class="col-result">${result ? escapeHtml(result) : blank}</td>
     <td class="col-player player-right"><strong>${escapeHtml(match.player2_name)}</strong></td>
   </tr>`;
 }
