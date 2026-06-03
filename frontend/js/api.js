@@ -146,17 +146,19 @@ function matchPlainResult(match) {
   return `${p1} x ${p2}`;
 }
 
-function printableMatchRow(match, idx) {
+
+function printableMatchRow(match) {
   const result = matchPlainResult(match);
   const blank = '<span class="blank-score"></span> x <span class="blank-score"></span>';
+  const roundText = `${divisionName(match.division)}${match.chave ? ` / Chave ${escapeHtml(normalizeChaveLabel(match.chave))}` : ''}${match.round_number ? ` / Rodada ${escapeHtml(match.round_number)}` : ''}`;
   return `<tr>
-    <td class="col-num">${idx + 1}</td>
-    <td>${escapeHtml(fmtDate(match.date))}</td>
-    <td>${escapeHtml(match.time || '')}</td>
-    <td>${escapeHtml(match.place_name || 'Sem local')}</td>
-    <td>${escapeHtml(divisionName(match.division))}${match.chave ? ` / Chave ${escapeHtml(normalizeChaveLabel(match.chave))}` : ''}${match.round_number ? ` / Rodada ${escapeHtml(match.round_number)}` : ''}</td>
-    <td><strong>${escapeHtml(match.player1_name)}</strong> x <strong>${escapeHtml(match.player2_name)}</strong></td>
-    <td>${result ? escapeHtml(result) : blank}</td>
+    <td class="col-date">${escapeHtml(fmtDate(match.date))}</td>
+    <td class="col-time">${escapeHtml(match.time || '')}</td>
+    <td class="col-local">${escapeHtml(match.place_name || 'Sem local')}</td>
+    <td class="col-round">${roundText}</td>
+    <td class="col-player player-left"><strong>${escapeHtml(match.player1_name)}</strong></td>
+    <td class="col-result">${result ? escapeHtml(result.replace(/^.*? /,'')) : blank}</td>
+    <td class="col-player player-right"><strong>${escapeHtml(match.player2_name)}</strong></td>
   </tr>`;
 }
 
@@ -172,47 +174,62 @@ function openMatchesPrintWindow(matches, title = 'Lista de jogos', subtitle = ''
   const pagesHtml = (pages.length ? pages : [[]]).map((page, pageIdx) => `
     <section class="print-page">
       <header class="print-header">
-        <div>
-          <h1>${escapeHtml(title)}</h1>
-          <p>${escapeHtml(subtitle || 'Jogos exibidos no filtro atual')}</p>
-        </div>
-        <div class="print-page-count">Página ${pageIdx + 1}/${Math.max(1, pages.length)}</div>
+        <h1>${escapeHtml(title)}</h1>
+        <p>${escapeHtml(subtitle || 'Jogos exibidos no filtro atual')}</p>
       </header>
       <table>
         <thead><tr>
-          <th>Nº</th><th>Data</th><th>Hora</th><th>Local</th><th>Div./chave</th><th>Jogo</th><th>Resultado</th>
+          <th class="col-date">Data</th>
+          <th class="col-time">Hora</th>
+          <th class="col-local">Local</th>
+          <th class="col-round">Divisão / chave / rodada</th>
+          <th class="col-player">Jogador 1</th>
+          <th class="col-result">Resultado</th>
+          <th class="col-player">Jogador 2</th>
         </tr></thead>
-        <tbody>${page.length ? page.map((m, idx) => printableMatchRow(m, pageIdx * 24 + idx)).join('') : '<tr><td colspan="7" class="empty-print">Nenhum jogo encontrado.</td></tr>'}</tbody>
+        <tbody>${page.length ? page.map((m) => printableMatchRow(m)).join('') : '<tr><td colspan="7" class="empty-print">Nenhum jogo encontrado.</td></tr>'}</tbody>
       </table>
-      <footer>2° campeonato municipal de sinuca · vitória = 3 pontos · vencedor recebe 7 bolas</footer>
+      <footer>
+        <div>2° campeonato municipal de sinuca · Lista de jogos · Página ${pageIdx + 1}/${Math.max(1, pages.length)}</div>
+        <div>Vitória = 3 pontos · vencedor recebe 7 bolas</div>
+      </footer>
     </section>
   `).join('');
 
   const html = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
     <style>
-      @page { size: A4; margin: 10mm; }
+      @page { size: A4 portrait; margin: 8mm; }
       * { box-sizing: border-box; }
-      body { margin: 0; font-family: Arial, Helvetica, sans-serif; color: #111; background: #fff; }
-      .print-page { page-break-after: always; min-height: 277mm; display: flex; flex-direction: column; }
-      .print-page:last-child { page-break-after: auto; }
-      .print-header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #111; padding-bottom: 8px; margin-bottom: 8px; }
-      h1 { margin: 0 0 3px; font-size: 22px; text-transform: uppercase; }
-      p { margin: 0; font-size: 12px; color: #333; }
-      .print-page-count { font-size: 12px; font-weight: 700; }
-      table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 11.5px; }
-      th, td { border: 1px solid #222; padding: 4px 5px; vertical-align: middle; height: 31px; }
-      th { background: #e8e8e8; text-transform: uppercase; font-size: 9.5px; }
-      .col-num { width: 28px; text-align: center; font-weight: 700; }
-      th:nth-child(2), td:nth-child(2) { width: 62px; }
-      th:nth-child(3), td:nth-child(3) { width: 42px; text-align: center; }
-      th:nth-child(4), td:nth-child(4) { width: 86px; }
-      th:nth-child(5), td:nth-child(5) { width: 88px; }
-      th:nth-child(7), td:nth-child(7) { width: 96px; text-align: center; }
-      .blank-score { display: inline-block; width: 32px; border-bottom: 2px solid #111; height: 14px; }
-      footer { margin-top: auto; padding-top: 6px; font-size: 10px; text-align: center; color: #333; }
-      .empty-print { text-align: center; padding: 22px; font-size: 14px; }
-      @media screen { body { background: #ddd; padding: 18px; } .print-page { background: #fff; margin: 0 auto 18px; padding: 10mm; width: 210mm; min-height: 297mm; box-shadow: 0 4px 28px rgba(0,0,0,.25); } }
-    </style></head><body>${pagesHtml}<script>setTimeout(() => window.print(), 350);<\/script></body></html>`;
+      html, body { margin: 0; padding: 0; background: #fff; color: #111; font-family: Arial, Helvetica, sans-serif; }
+      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .print-page { page-break-after: always; break-after: page; width: 100%; overflow: hidden; }
+      .print-page:last-child { page-break-after: auto; break-after: auto; }
+      .print-header { border-bottom: 2px solid #111; padding-bottom: 5px; margin-bottom: 6px; }
+      h1 { margin: 0 0 2px; font-size: 18px; text-transform: uppercase; letter-spacing: .4px; }
+      p { margin: 0; font-size: 10px; color: #333; }
+      table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 10px; }
+      th, td { border: 1px solid #222; padding: 3px 4px; vertical-align: middle; height: 10.2mm; }
+      th { background: #efefef; text-transform: uppercase; font-size: 8.6px; line-height: 1.1; }
+      .col-date { width: 14%; }
+      .col-time { width: 8%; text-align: center; }
+      .col-local { width: 18%; }
+      .col-round { width: 18%; }
+      .col-player { width: 17%; }
+      .col-result { width: 8%; text-align: center; white-space: nowrap; }
+      .player-left { text-align: right; }
+      .player-right { text-align: left; }
+      .blank-score { display: inline-block; width: 16px; border-bottom: 1.8px solid #111; height: 10px; vertical-align: middle; margin: 0 1px; }
+      footer { display: flex; justify-content: space-between; gap: 8px; margin-top: 4px; font-size: 9px; color: #333; }
+      .empty-print { text-align: center; padding: 22px; font-size: 12px; }
+      @media screen {
+        body { background: #d9d9d9; padding: 16px; }
+        .print-page { background: #fff; width: 194mm; min-height: 281mm; margin: 0 auto 14px; padding: 0; box-shadow: 0 4px 22px rgba(0,0,0,.22); }
+      }
+      @media print {
+        body { background: #fff; padding: 0; }
+        .print-page { margin: 0; box-shadow: none; }
+      }
+    </style></head><body>${pagesHtml}<script>setTimeout(() => window.print(), 250);<\/script></body></html>`;
 
   const win = window.open('', '_blank');
   if (!win) {

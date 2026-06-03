@@ -168,6 +168,7 @@ function renderStandings() {
   });
 }
 
+
 function drawRoundedRect(ctx, x, y, w, h, r) {
   ctx.beginPath();
   ctx.moveTo(x + r, y);
@@ -178,163 +179,226 @@ function drawRoundedRect(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
-function drawShareBackground(ctx, width, height) {
-  const grad = ctx.createLinearGradient(0, 0, width, height);
-  grad.addColorStop(0, '#020803');
-  grad.addColorStop(0.35, '#0b2e16');
-  grad.addColorStop(0.68, '#07140e');
-  grad.addColorStop(1, '#000000');
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, width, height);
+function loadCanvasImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error(`Falha ao carregar imagem: ${src}`));
+    img.src = src;
+  });
+}
 
-  for (let i = 0; i < 24; i++) {
-    ctx.save();
-    ctx.globalAlpha = 0.10 + Math.random() * 0.10;
-    ctx.strokeStyle = i % 3 === 0 ? '#88ff00' : '#18d26b';
-    ctx.lineWidth = 4 + Math.random() * 8;
-    const y = 130 + Math.random() * (height - 300);
-    ctx.beginPath();
-    ctx.moveTo(-80, y);
-    ctx.lineTo(width + 100, y - 260 + Math.random() * 160);
-    ctx.stroke();
-    ctx.restore();
+function drawImageCover(ctx, img, x, y, w, h) {
+  const scale = Math.max(w / img.width, h / img.height);
+  const sw = w / scale;
+  const sh = h / scale;
+  const sx = (img.width - sw) / 2;
+  const sy = (img.height - sh) / 2;
+  ctx.drawImage(img, sx, sy, sw, sh, x, y, w, h);
+}
+
+async function drawShareBackground(ctx, width, height) {
+  try {
+    const bg = await loadCanvasImage('/img/share-bg-base.png');
+    drawImageCover(ctx, bg, 0, 0, width, height);
+  } catch (_) {
+    const grad = ctx.createLinearGradient(0, 0, width, height);
+    grad.addColorStop(0, '#0a1710');
+    grad.addColorStop(1, '#031009');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, width, height);
   }
 
-  ctx.save();
-  ctx.globalAlpha = 0.16;
-  ctx.strokeStyle = '#d7a64a';
-  ctx.lineWidth = 18;
-  ctx.beginPath();
-  ctx.moveTo(width * 0.08, height * 0.90);
-  ctx.lineTo(width * 0.92, height * 0.15);
-  ctx.stroke();
-  ctx.restore();
-
-  const balls = [
-    [110, 1720, 48, '#f6d34d', '1'], [210, 1780, 48, '#255fe8', '2'], [310, 1715, 48, '#d12e2e', '3'],
-    [940, 210, 52, '#111', '8'], [840, 300, 42, '#f3f3f3', ''], [120, 260, 34, '#2fa557', '6']
-  ];
-  balls.forEach(([x, y, r, color, num]) => {
-    const bgrad = ctx.createRadialGradient(x - r * .35, y - r * .45, r * .1, x, y, r);
-    bgrad.addColorStop(0, '#ffffff');
-    bgrad.addColorStop(.22, color);
-    bgrad.addColorStop(1, '#020202');
-    ctx.fillStyle = bgrad;
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fill();
-    if (num) {
-      ctx.fillStyle = color === '#111' ? '#fff' : '#111';
-      ctx.font = `900 ${Math.round(r * .75)}px Arial`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(num, x, y + 1);
-    }
-  });
+  const darkOverlay = ctx.createLinearGradient(0, 0, 0, height);
+  darkOverlay.addColorStop(0, 'rgba(0,0,0,.20)');
+  darkOverlay.addColorStop(.3, 'rgba(0,0,0,.12)');
+  darkOverlay.addColorStop(1, 'rgba(0,0,0,.28)');
+  ctx.fillStyle = darkOverlay;
+  ctx.fillRect(0, 0, width, height);
 
   ctx.save();
-  ctx.globalAlpha = .55;
-  const vignette = ctx.createRadialGradient(width / 2, height * .48, 200, width / 2, height / 2, height * .75);
-  vignette.addColorStop(0, 'rgba(0,0,0,0)');
-  vignette.addColorStop(1, 'rgba(0,0,0,.78)');
+  const vignette = ctx.createRadialGradient(width / 2, height / 2, 120, width / 2, height / 2, height * .75);
+  vignette.addColorStop(0, 'rgba(255,255,255,0)');
+  vignette.addColorStop(1, 'rgba(0,0,0,.35)');
   ctx.fillStyle = vignette;
   ctx.fillRect(0, 0, width, height);
   ctx.restore();
 }
 
-function fitText(ctx, text, x, y, maxWidth, fontBase, minSize = 24) {
+function fitText(ctx, text, x, y, maxWidth, fontBase, minSize = 24, family = 'Georgia, Times New Roman, serif', weight = 700) {
   let size = fontBase;
   do {
-    ctx.font = `900 ${size}px Arial, Helvetica, sans-serif`;
+    ctx.font = `${weight} ${size}px ${family}`;
     if (ctx.measureText(text).width <= maxWidth) break;
     size -= 2;
   } while (size >= minSize);
   ctx.fillText(text, x, y);
 }
 
-function drawShareTable(ctx, rows, division, chave, showChave, width, height) {
-  const margin = 64;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillStyle = '#f5f7f4';
-  ctx.shadowColor = 'rgba(0,0,0,.75)';
-  ctx.shadowBlur = 18;
-  fitText(ctx, '2° CAMPEONATO MUNICIPAL DE SINUCA', width / 2, 100, width - 100, 54, 34);
-  ctx.shadowBlur = 0;
-
-  ctx.fillStyle = '#93ff16';
-  ctx.font = '900 44px Arial, Helvetica, sans-serif';
-  const subtitle = `${divisionName(division).toUpperCase()}${showChave ? ` · CHAVE ${chave}` : ''}`;
-  ctx.fillText(subtitle, width / 2, 166);
-
-  const tableX = margin;
-  const tableY = 230;
-  const tableW = width - margin * 2;
-  const footerH = 88;
-  const headerH = 58;
-  const maxTableH = height - tableY - footerH - 64;
-  const rowH = Math.max(36, Math.min(58, Math.floor((maxTableH - headerH) / Math.max(1, rows.length))));
-  const actualTableH = headerH + rowH * rows.length;
-
+function drawDecorativeLine(ctx, x1, x2, y) {
   ctx.save();
-  ctx.shadowColor = 'rgba(0,0,0,.65)';
-  ctx.shadowBlur = 26;
-  drawRoundedRect(ctx, tableX, tableY, tableW, actualTableH, 28);
-  ctx.fillStyle = 'rgba(2, 10, 7, .82)';
+  ctx.strokeStyle = 'rgba(214,177,84,.85)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(x1, y);
+  ctx.lineTo(x2, y);
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(239,212,130,.95)';
+  ctx.beginPath();
+  ctx.arc((x1 + x2) / 2, y, 4, 0, Math.PI * 2);
   ctx.fill();
+  ctx.restore();
+}
+
+function drawCornerOrnament(ctx, x, y, size, flipX = false, flipY = false) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(flipX ? -1 : 1, flipY ? -1 : 1);
+  ctx.strokeStyle = 'rgba(215,178,84,.95)';
   ctx.lineWidth = 3;
-  ctx.strokeStyle = 'rgba(147,255,22,.45)';
+  ctx.beginPath();
+  ctx.moveTo(0, size * .45);
+  ctx.quadraticCurveTo(0, 0, size * .45, 0);
+  ctx.lineTo(size * .82, 0);
+  ctx.moveTo(0, size * .68);
+  ctx.quadraticCurveTo(size * .12, size * .18, size * .68, 0);
+  ctx.moveTo(size * .18, size * .18);
+  ctx.quadraticCurveTo(size * .22, size * .04, size * .37, size * .04);
   ctx.stroke();
   ctx.restore();
+}
+
+function drawOrnateFrame(ctx, x, y, w, h) {
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,.35)';
+  ctx.shadowBlur = 14;
+  drawRoundedRect(ctx, x, y, w, h, 26);
+  ctx.fillStyle = 'rgba(9,32,18,.76)';
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = 'rgba(214,177,84,.92)';
+  ctx.stroke();
+  drawRoundedRect(ctx, x + 10, y + 10, w - 20, h - 20, 18);
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = 'rgba(237,219,150,.65)';
+  ctx.stroke();
+  drawCornerOrnament(ctx, x + 16, y + 16, 48, false, false);
+  drawCornerOrnament(ctx, x + w - 16, y + 16, 48, true, false);
+  drawCornerOrnament(ctx, x + 16, y + h - 16, 48, false, true);
+  drawCornerOrnament(ctx, x + w - 16, y + h - 16, 48, true, true);
+  ctx.restore();
+}
+
+function drawShareTable(ctx, rows, division, chave, showChave, width, height) {
+  const titleColor = '#e7c46b';
+  const titleGlow = '#5f4716';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  ctx.save();
+  ctx.shadowColor = titleGlow;
+  ctx.shadowBlur = 22;
+  ctx.fillStyle = titleColor;
+  ctx.font = '700 62px Georgia, Times New Roman, serif';
+  ctx.fillText('2° CAMPEONATO DE', width / 2, 150);
+  ctx.font = '700 98px Georgia, Times New Roman, serif';
+  fitText(ctx, 'SINUCA DE', width / 2, 240, width - 160, 98, 56, 'Georgia, Times New Roman, serif', 700);
+  fitText(ctx, 'ENTRE FOLHAS', width / 2, 350, width - 120, 104, 60, 'Georgia, Times New Roman, serif', 700);
+  ctx.shadowBlur = 0;
+  ctx.restore();
+
+  ctx.fillStyle = '#f0d98a';
+  ctx.font = '700 56px Georgia, Times New Roman, serif';
+  ctx.fillText(divisionName(division).toUpperCase(), width / 2, 450);
+  if (showChave) {
+    drawDecorativeLine(ctx, width * .18, width * .82, 495);
+    ctx.font = '700 62px Georgia, Times New Roman, serif';
+    ctx.fillText(`CHAVE ${String(chave).toUpperCase()}`, width / 2, 535);
+  }
+
+  const tableX = 102;
+  const tableY = showChave ? 620 : 540;
+  const tableW = width - 204;
+  const availableH = height - tableY - 120;
+  const headerH = 64;
+  const rowH = Math.max(44, Math.min(72, Math.floor((availableH - headerH - 16) / Math.max(1, rows.length))));
+  const tableH = headerH + rowH * rows.length + 20;
+
+  drawOrnateFrame(ctx, tableX, tableY, tableW, tableH);
+
+  const innerX = tableX + 24;
+  const innerY = tableY + 20;
+  const innerW = tableW - 48;
 
   const cols = [
-    {label: 'POS', x: tableX + 35, w: 70, align: 'center'},
-    {label: 'JOGADOR', x: tableX + 100, w: tableW - 410, align: 'left'},
-    {label: 'PTS', x: tableX + tableW - 300, w: 62, align: 'center'},
-    {label: 'VIT', x: tableX + tableW - 238, w: 62, align: 'center'},
-    {label: 'JOG', x: tableX + tableW - 176, w: 62, align: 'center'},
-    {label: 'SALDO', x: tableX + tableW - 104, w: 90, align: 'center'},
+    { label: 'POS', width: 0.12, align: 'center' },
+    { label: 'NOME', width: 0.36, align: 'left' },
+    { label: 'PTS', width: 0.13, align: 'center' },
+    { label: 'VIT', width: 0.12, align: 'center' },
+    { label: 'JGS', width: 0.12, align: 'center' },
+    { label: 'SB',  width: 0.15, align: 'center' },
   ];
-  ctx.fillStyle = 'rgba(147,255,22,.22)';
-  drawRoundedRect(ctx, tableX, tableY, tableW, headerH, 28);
-  ctx.fill();
-  ctx.fillStyle = '#cfff71';
-  ctx.font = '900 22px Arial, Helvetica, sans-serif';
+  let accX = innerX;
+  cols.forEach(c => {
+    c.x = accX;
+    c.w = Math.round(innerW * c.width);
+    accX += c.w;
+  });
+  cols[cols.length - 1].w = innerX + innerW - cols[cols.length - 1].x;
+
+  ctx.fillStyle = 'rgba(15,53,28,.72)';
+  ctx.fillRect(innerX, innerY, innerW, headerH);
+  ctx.strokeStyle = 'rgba(214,177,84,.55)';
+  ctx.lineWidth = 1.2;
+  ctx.strokeRect(innerX, innerY, innerW, headerH);
+
+  ctx.fillStyle = '#f0d98a';
+  ctx.font = '700 23px Georgia, Times New Roman, serif';
   cols.forEach(c => {
     ctx.textAlign = c.align;
-    ctx.fillText(c.label, c.align === 'left' ? c.x : c.x + c.w / 2, tableY + headerH / 2);
+    const tx = c.align === 'left' ? c.x + 18 : c.x + c.w / 2;
+    ctx.fillText(c.label, tx, innerY + headerH / 2 + 1);
   });
 
   rows.forEach((row, idx) => {
-    const y = tableY + headerH + idx * rowH;
-    if (row.rank_status === 'promotion') ctx.fillStyle = 'rgba(34, 214, 112, .36)';
-    else if (row.rank_status === 'relegation') ctx.fillStyle = 'rgba(255, 70, 70, .34)';
-    else ctx.fillStyle = idx % 2 ? 'rgba(255,255,255,.045)' : 'rgba(255,255,255,.02)';
-    ctx.fillRect(tableX + 8, y, tableW - 16, rowH);
-    ctx.strokeStyle = 'rgba(255,255,255,.09)';
+    const y = innerY + headerH + idx * rowH;
+    const isPromotion = row.rank_status === 'promotion';
+    const isRelegation = row.rank_status === 'relegation';
+    let bg = idx % 2 ? 'rgba(255,255,255,.025)' : 'rgba(255,255,255,.012)';
+    if (isPromotion) bg = 'rgba(34,177,76,.28)';
+    if (isRelegation) bg = 'rgba(190,48,35,.30)';
+    ctx.fillStyle = bg;
+    ctx.fillRect(innerX, y, innerW, rowH);
+
+    ctx.strokeStyle = 'rgba(214,177,84,.22)';
     ctx.beginPath();
-    ctx.moveTo(tableX + 18, y + rowH);
-    ctx.lineTo(tableX + tableW - 18, y + rowH);
+    ctx.moveTo(innerX, y + rowH);
+    ctx.lineTo(innerX + innerW, y + rowH);
     ctx.stroke();
+    cols.slice(1).forEach(c => {
+      ctx.beginPath();
+      ctx.moveTo(c.x, y);
+      ctx.lineTo(c.x, y + rowH);
+      ctx.stroke();
+    });
 
-    ctx.fillStyle = '#ffffff';
-    ctx.font = `900 ${Math.max(20, Math.floor(rowH * .42))}px Arial, Helvetica, sans-serif`;
+    ctx.fillStyle = '#f5ecd1';
+    const fontSize = Math.max(18, Math.floor(rowH * .44));
+    const nameSize = Math.max(17, Math.floor(rowH * .42));
+    ctx.font = `700 ${fontSize}px Georgia, Times New Roman, serif`;
     ctx.textAlign = 'center';
-    ctx.fillText(String(idx + 1), cols[0].x + cols[0].w / 2, y + rowH / 2);
-
+    ctx.fillText(String(idx + 1), cols[0].x + cols[0].w / 2, y + rowH / 2 + 1);
     ctx.textAlign = 'left';
-    ctx.font = `900 ${Math.max(19, Math.floor(rowH * .40))}px Arial, Helvetica, sans-serif`;
-    ctx.fillText(abbreviateName(row.name, rows.length > 22 ? 18 : 24).toUpperCase(), cols[1].x, y + rowH / 2);
-
-    const vals = [row.points, row.wins, row.played, row.balls_balance];
+    ctx.font = `700 ${nameSize}px Georgia, Times New Roman, serif`;
+    ctx.fillText(abbreviateName(row.name, rows.length > 14 ? 16 : 22), cols[1].x + 12, y + rowH / 2 + 1);
     ctx.textAlign = 'center';
-    vals.forEach((val, i) => ctx.fillText(String(val), cols[i + 2].x + cols[i + 2].w / 2, y + rowH / 2));
+    ctx.font = `700 ${fontSize}px Georgia, Times New Roman, serif`;
+    [row.points, row.wins, row.played, (row.balls_balance > 0 ? '+' : '') + row.balls_balance].forEach((val, i) => {
+      const c = cols[i + 2];
+      ctx.fillText(String(val), c.x + c.w / 2, y + rowH / 2 + 1);
+    });
   });
-
-  ctx.textAlign = 'center';
-  ctx.fillStyle = '#f1f1f1';
-  ctx.font = '800 22px Arial, Helvetica, sans-serif';
-  ctx.fillText('Verde: classificados · Vermelho: rebaixados · Vitória = 3 pontos · Saldo de bolas como desempate', width / 2, height - 58);
 }
 
 async function generateShareImage(division, chave, showChave) {
@@ -344,7 +408,7 @@ async function generateShareImage(division, chave, showChave) {
   canvas.width = 1080;
   canvas.height = 1920;
   const ctx = canvas.getContext('2d');
-  drawShareBackground(ctx, canvas.width, canvas.height);
+  await drawShareBackground(ctx, canvas.width, canvas.height);
   drawShareTable(ctx, rows, division, chave, showChave, canvas.width, canvas.height);
   const filename = `classificacao-${division}div${showChave ? '-chave-' + chave : ''}.png`.toLowerCase();
   canvas.toBlob(async blob => {

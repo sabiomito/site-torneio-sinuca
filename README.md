@@ -118,3 +118,9 @@ SECRET_KEY
 - A impressão gera uma página própria com os jogos filtrados, cerca de 24 jogos por folha.
 - Jogos com resultado aparecem preenchidos; jogos pendentes aparecem com espaço para preencher manualmente depois de impresso.
 - O botão de impressão foi adicionado na tela pública e também no admin para usar os filtros atuais de partidas.
+
+
+## Atualização visual de compartilhamento e impressão
+
+- A imagem de compartilhamento agora usa `frontend/img/share-bg-base.png` como fundo principal.
+- A lista de impressão foi ajustada para caber corretamente em A4 com até 24 jogos por página.
