@@ -48,10 +48,13 @@ Resources:
           TABLE_NAME: !Ref TournamentTable
           ADMIN_PASSWORD: !Ref AdminPassword
           SECRET_KEY: !Ref SecretKey
+          MEDIA_BUCKET: !Ref SiteBucket
           DATABASE_RESET_VERSION: 'v7-rodadas-20260530-01'
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref TournamentTable
+        - S3CrudPolicy:
+            BucketName: !Ref SiteBucket
       FunctionUrlConfig:
         AuthType: NONE
         Cors:
@@ -107,6 +110,12 @@ Resources:
             request.uri = '/player.html';
           } else if (request.uri === '/telao' || request.uri === '/telao/' || request.uri === '/tv' || request.uri === '/tv/') {
             request.uri = '/telao.html';
+          } else if (request.uri.indexOf('/perfil/') === 0 || request.uri === '/perfil' || request.uri === '/perfil/') {
+            request.uri = '/perfil.html';
+          } else if (request.uri === '/admin/jogador' || request.uri === '/admin/jogador/') {
+            request.uri = '/admin-player.html';
+          } else if (request.uri === '/admin/patrocinador' || request.uri === '/admin/patrocinador/') {
+            request.uri = '/sponsor-edit.html';
           } else if (request.uri === '/') {
             request.uri = '/index.html';
           }

@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Editar patrocinador - Admin</title>
+  <link rel="icon" type="image/png" href="/img/favicon.png">
+  <link rel="apple-touch-icon" href="/img/favicon-180.png">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/admin">← Voltar ao admin</a>
+    <nav><a href="/index.html">Placar</a></nav>
+  </header>
+  <main class="container">
+    <section class="card">
+      <div class="section-title">
+        <h1>Editar patrocinador</h1>
+        <span>imagens para telão</span>
+      </div>
+      <form id="sponsor-edit-form" class="stack-form">
+        <label>Nome
+          <input type="text" id="edit-sponsor-name" required>
+        </label>
+        <div class="grid-2 sponsor-edit-grid">
+          <div>
+            <h3>Imagem quadrada</h3>
+            <img id="sponsor-square-preview" class="sponsor-square-preview" src="/img/entre-folhas-logo-card.png" alt="Prévia quadrada">
+            <label>Selecionar imagem quadrada
+              <input type="file" id="sponsor-square-file" accept="image/*">
+            </label>
+            <p class="muted">Será cortada proporcionalmente e salva em JPEG 400x400.</p>
+          </div>
+          <div>
+            <h3>Imagem retangular</h3>
+            <img id="sponsor-rect-preview" class="sponsor-rect-preview" src="/img/banner-tacos-sinuca.png" alt="Prévia retangular">
+            <label>Selecionar imagem retangular
+              <input type="file" id="sponsor-rect-file" accept="image/*">
+            </label>
+            <p class="muted">Será cortada proporcionalmente e salva em JPEG 1200x400.</p>
+          </div>
+        </div>
+        <button type="submit">Salvar patrocinador</button>
+        <p id="sponsor-edit-message" class="muted"></p>
+      </form>
+    </section>
+  </main>
+  <script src="/config.js"></script>
+  <script src="/js/api.js"></script>
+  <script src="/js/image-tools.js"></script>
+  <script src="/js/sponsor-edit.js"></script>
+</body>
+</html>

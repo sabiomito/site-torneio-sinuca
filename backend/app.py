@@ -4,11 +4,13 @@ import hmac
 import json
 import os
 import random
+import re
 import time
 import uuid
 from datetime import datetime
 from decimal import Decimal
 from itertools import combinations
+from urllib.parse import quote, unquote
 
 import boto3
 from boto3.dynamodb.conditions import Attr
@@ -18,9 +20,11 @@ ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "1234")
 SECRET_KEY = os.environ.get("SECRET_KEY", "troque-esta-chave")
 SESSION_SECONDS = int(os.environ.get("SESSION_SECONDS", "43200"))
 DATABASE_RESET_VERSION = os.environ.get("DATABASE_RESET_VERSION", "")
+MEDIA_BUCKET = os.environ.get("MEDIA_BUCKET", "")
 
 _dynamodb = boto3.resource("dynamodb")
 _table = _dynamodb.Table(TABLE_NAME) if TABLE_NAME else None
+_s3 = boto3.client("s3") if MEDIA_BUCKET else None
 _reset_checked = False
 
 
@@ -267,6 +271,67 @@ class RoundConflictError(ValueError):
         super().__init__(message)
 
 
+
+def slugify_name(name):
+    text = str(name or "").strip().lower()
+    replacements = {
+        "á": "a", "à": "a", "ã": "a", "â": "a", "ä": "a",
+        "é": "e", "è": "e", "ê": "e", "ë": "e",
+        "í": "i", "ì": "i", "î": "i", "ï": "i",
+        "ó": "o", "ò": "o", "õ": "o", "ô": "o", "ö": "o",
+        "ú": "u", "ù": "u", "û": "u", "ü": "u",
+        "ç": "c", "ñ": "n",
+    }
+    for src, dst in replacements.items():
+        text = text.replace(src, dst)
+    text = re.sub(r"[^a-z0-9]+", "-", text).strip("-")
+    return text or "jogador"
+
+
+def player_profile_url(player):
+    return "/perfil/" + quote(slugify_name(player.get("name", "")))
+
+
+def clean_public_player(player):
+    item = dict(player)
+    item["slug"] = slugify_name(item.get("name", ""))
+    item["profile_url"] = player_profile_url(item)
+    item.setdefault("short_message", "")
+    item.setdefault("photo_url", "")
+    return item
+
+
+def parse_image_payload(data_url):
+    if not data_url:
+        return None
+    text = str(data_url)
+    if "," not in text or not text.startswith("data:image/"):
+        raise ValueError("Imagem inválida.")
+    header, payload = text.split(",", 1)
+    if "base64" not in header:
+        raise ValueError("Imagem inválida.")
+    raw = base64.b64decode(payload)
+    if len(raw) > 4_500_000:
+        raise ValueError("Imagem muito grande. Envie uma imagem menor.")
+    return raw
+
+
+def save_jpeg_media(data_url, key):
+    raw = parse_image_payload(data_url)
+    if raw is None:
+        return ""
+    if not MEDIA_BUCKET or not _s3:
+        raise ValueError("Bucket de mídia não configurado no servidor.")
+    _s3.put_object(
+        Bucket=MEDIA_BUCKET,
+        Key=key,
+        Body=raw,
+        ContentType="image/jpeg",
+        CacheControl="public, max-age=31536000",
+    )
+    return "/" + key
+
+
 def build_pair_key(division, chave, p1_id, p2_id):
     ordered = sorted([str(p1_id), str(p2_id)])
     return f"D{normalize_int(division, 1)}#K{normalize_chave(chave)}#{ordered[0]}#{ordered[1]}"
@@ -491,6 +556,12 @@ def upsert_player(data):
     if chave not in available_chaves_for_division(config, division):
         raise ValueError("Selecione uma chave disponível para essa divisão.")
     player_id = str(data.get("player_id") or data.get("id") or make_id("player"))
+
+    for other in get_players():
+        if other.get("player_id") != player_id and str(other.get("name", "")).strip().lower() == name.lower():
+            raise ValueError("Já existe um jogador com esse nome. Escolha um nome único.")
+
+    current = get_item("PLAYER", player_id) or {}
     item = {
         "pk": "PLAYER",
         "sk": player_id,
@@ -499,9 +570,28 @@ def upsert_player(data):
         "name": name,
         "division": division,
         "chave": chave,
-        "created_at": data.get("created_at") or now_iso(),
+        "short_message": str(data.get("short_message", current.get("short_message", "")) or "").strip()[:160],
+        "photo_url": current.get("photo_url", ""),
+        "created_at": current.get("created_at") or data.get("created_at") or now_iso(),
+        "updated_at": now_iso(),
     }
+    photo_data_url = data.get("photo_data_url")
+    if photo_data_url:
+        item["photo_url"] = save_jpeg_media(photo_data_url, f"media/players/{player_id}/photo.jpg")
     put_item(item)
+
+    # Mantém nomes já exibidos nas partidas novas/pendentes quando o nome muda.
+    if current and current.get("name") != name:
+        for m in get_matches():
+            changed = False
+            if m.get("player1_id") == player_id:
+                m["player1_name"] = name
+                changed = True
+            if m.get("player2_id") == player_id:
+                m["player2_name"] = name
+                changed = True
+            if changed:
+                put_item(m)
     return item
 
 
@@ -776,6 +866,8 @@ def set_match_result(data):
         match["balls_p1"] = 0
         match["balls_p2"] = 0
         match["is_finished"] = False
+        match["updated_at"] = now_iso()
+        match["result_saved_at"] = ""
         put_item(match)
         delete_item("RESULT", pair_key)
         return match
@@ -788,10 +880,13 @@ def set_match_result(data):
         balls_p1 = 7
     if winner_id == match.get("player2_id"):
         balls_p2 = 7
+    saved_at = now_iso()
     match["winner_id"] = winner_id
     match["balls_p1"] = balls_p1
     match["balls_p2"] = balls_p2
     match["is_finished"] = True
+    match["result_saved_at"] = saved_at
+    match["updated_at"] = saved_at
     put_item(match)
     put_item({
         "pk": "RESULT",
@@ -808,7 +903,8 @@ def set_match_result(data):
         "balls_p1": balls_p1,
         "balls_p2": balls_p2,
         "is_finished": True,
-        "created_at": now_iso(),
+        "created_at": saved_at,
+        "result_saved_at": saved_at,
     })
     return match
 
@@ -820,6 +916,10 @@ def calculate_standings(players, matches, results, config):
         table[pid] = {
             "player_id": pid,
             "name": p.get("name", ""),
+            "short_message": p.get("short_message", ""),
+            "photo_url": p.get("photo_url", ""),
+            "slug": slugify_name(p.get("name", "")),
+            "profile_url": player_profile_url(p),
             "division": normalize_int(p.get("division"), 1),
             "chave": normalize_chave(p.get("chave", "A")),
             "played": 0,
@@ -885,24 +985,28 @@ def calculate_standings(players, matches, results, config):
 
 def public_state():
     config = get_config()
-    players = get_players()
+    players = [clean_public_player(p) for p in get_players()]
     rounds = get_rounds()
     matches = get_matches()
     results = get_results()
+    sponsors = get_sponsors()
     dates = derive_dates(matches, rounds)
     places = derive_places(matches, rounds)
     standings = calculate_standings(players, matches, results, config)
     requirements = round_requirements(config, players, rounds, matches, results)
+    latest_result = latest_finished_match(matches)
     return {
         "config": config,
         "players": players,
         "rounds": rounds,
         "matches": matches,
         "results": results,
+        "sponsors": sponsors,
         "dates": dates,
         "places": places,
         "standings": standings,
         "round_requirements": requirements,
+        "latest_result": latest_result,
     }
 
 
@@ -919,6 +1023,15 @@ def handle_admin_mutation(event, action):
             return response(200, {"player": item, "state": public_state()})
         if action == "delete-player":
             delete_player(data.get("player_id"))
+            return response(200, {"ok": True, "state": public_state()})
+        if action == "update-player":
+            item = upsert_player(data)
+            return response(200, {"player": item, "state": public_state()})
+        if action == "sponsor":
+            item = upsert_sponsor(data)
+            return response(200, {"sponsor": item, "state": public_state()})
+        if action == "delete-sponsor":
+            delete_sponsor(data.get("sponsor_id"))
             return response(200, {"ok": True, "state": public_state()})
         if action == "round-auto":
             result = create_round(data, manual=False)

@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Editar jogador - Admin</title>
+  <link rel="icon" type="image/png" href="/img/favicon.png">
+  <link rel="apple-touch-icon" href="/img/favicon-180.png">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/admin">← Voltar ao admin</a>
+    <nav><a href="/index.html">Placar</a></nav>
+  </header>
+  <main class="container">
+    <section class="card">
+      <div class="section-title">
+        <h1>Editar info do jogador</h1>
+        <span>foto, nome e mensagem curta</span>
+      </div>
+      <form id="player-edit-form" class="stack-form">
+        <div class="profile-edit-grid">
+          <div>
+            <img id="player-photo-preview" class="profile-photo edit-preview" src="/img/entre-folhas-logo-transparent.png" alt="Prévia da foto">
+            <label>Foto do jogador
+              <input type="file" id="player-photo-file" accept="image/*">
+            </label>
+            <p class="muted">No celular, use a câmera ou galeria. A imagem será cortada quadrada e salva em JPEG 400x400.</p>
+          </div>
+          <div class="stack-form">
+            <label>Nome
+              <input type="text" id="edit-player-name" required>
+            </label>
+            <label>Mensagem curta
+              <textarea id="edit-player-message" rows="4" maxlength="160" placeholder="Ex.: Jogador experiente, foco total na final."></textarea>
+            </label>
+            <div class="grid-2">
+              <label>Divisão
+                <select id="edit-player-division"></select>
+              </label>
+              <label>Chave
+                <select id="edit-player-chave"></select>
+              </label>
+            </div>
+            <button type="submit">Salvar jogador</button>
+            <p id="player-edit-message" class="muted"></p>
+          </div>
+        </div>
+      </form>
+    </section>
+  </main>
+  <script src="/config.js"></script>
+  <script src="/js/api.js"></script>
+  <script src="/js/image-tools.js"></script>
+  <script src="/js/admin-player.js"></script>
+</body>
+</html>

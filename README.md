@@ -135,3 +135,14 @@ SECRET_KEY
 
 - Adicionado logo do campeonato para card do WhatsApp/Open Graph, hero da página inicial e favicon transparente.
 - Adicionada tela de telão em `/telao` com atualização automática a cada 60 segundos.
+
+
+## Atualização v14 — perfis, patrocinadores e telão dinâmico
+
+- Jogadores agora têm perfil público em `/perfil/nome-do-jogador`.
+- Os nomes dos jogadores no placar e nos jogos públicos levam para o perfil.
+- O admin permite editar nome, divisão, chave, mensagem curta e foto quadrada do jogador.
+- Nomes de jogadores agora são validados para não repetir.
+- Adicionado cadastro de patrocinadores, com imagem quadrada 400x400 e retangular 1200x400.
+- O deploy preserva a pasta `media/` no S3 para não apagar fotos enviadas pelo painel.
+- O modo telão agora alterna entre tabelas, patrocinadores e último resultado salvo.

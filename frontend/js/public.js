@@ -23,6 +23,7 @@ async function loadPublicState() {
   const matchesEl = document.getElementById('matches');
   try {
     state = await apiFetch('/state');
+    window.CURRENT_STATE_PLAYERS = state.players || [];
     setupFilters();
     renderStandings();
     renderFilteredMatches();
@@ -98,7 +99,7 @@ function renderStandingsTable(rows) {
         : '<span class="muted">—</span>';
     html += `<tr class="${escapeHtml(row.rank_status)}">
       <td>${idx + 1}</td>
-      <td><a class="player-link" href="/player.html?id=${encodeURIComponent(row.player_id)}">${escapeHtml(row.name)}</a></td>
+      <td>${playerLinkHtml(row.player_id, row.name)}</td>
       <td><strong>${row.points}</strong></td>
       <td>${row.wins}</td>
       <td>${row.played}</td>

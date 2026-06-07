@@ -148,6 +148,7 @@ function renderAll() {
   adminState.rounds = adminState.rounds || [];
   adminState.matches = adminState.matches || [];
   adminState.round_requirements = adminState.round_requirements || [];
+  adminState.sponsors = adminState.sponsors || [];
   const config = adminState.config;
   document.getElementById('division-count').value = config.division_count;
   document.getElementById('duration-minutes').value = config.duration_minutes;
@@ -162,6 +163,7 @@ function renderAll() {
   renderPlayersList();
   renderRoundsList();
   renderAdminMatches();
+  renderSponsorsList();
 }
 
 function renderRoundRequirements() {
@@ -195,8 +197,14 @@ function renderPlayersList() {
     return;
   }
   container.innerHTML = adminState.players.map(p => `<div class="list-item">
-    <div><strong>${escapeHtml(p.name)}</strong><div class="match-meta">${divisionName(p.division)} · Chave ${escapeHtml(normalizeChave(p.chave))}</div></div>
-    <button class="small danger" data-delete-player="${escapeHtml(p.player_id)}">Excluir</button>
+    <div class="list-main-with-photo">
+      <img class="mini-avatar" src="${escapeHtml(p.photo_url || '/img/entre-folhas-logo-transparent.png')}" alt="">
+      <div><strong>${escapeHtml(p.name)}</strong><div class="match-meta">${divisionName(p.division)} · Chave ${escapeHtml(normalizeChave(p.chave))}${p.short_message ? ` · ${escapeHtml(p.short_message)}` : ''}</div></div>
+    </div>
+    <div class="list-actions">
+      <a class="small-button ghost" href="/admin/jogador?id=${encodeURIComponent(p.player_id)}">Editar info</a>
+      <button class="small danger" data-delete-player="${escapeHtml(p.player_id)}">Excluir</button>
+    </div>
   </div>`).join('');
   container.querySelectorAll('[data-delete-player]').forEach(btn => {
     btn.addEventListener('click', async () => {
@@ -247,6 +255,40 @@ function renderRoundsList() {
       adminState = data.state || await adminFetch('/admin/state');
       preserveScroll(renderAll);
       toast('Rodada excluída.');
+    });
+  });
+}
+
+
+function renderSponsorsList() {
+  const container = document.getElementById('sponsors-list');
+  if (!container) return;
+  const sponsors = adminState.sponsors || [];
+  if (!sponsors.length) {
+    container.innerHTML = '<div class="empty">Nenhum patrocinador cadastrado.</div>';
+    return;
+  }
+  container.innerHTML = sponsors.map(s => `<div class="list-item">
+    <div class="list-main-with-photo">
+      <img class="mini-avatar" src="${escapeHtml(s.square_image_url || s.rect_image_url || '/img/entre-folhas-logo-card.png')}" alt="">
+      <div>
+        <strong>${escapeHtml(s.name)}</strong>
+        <div class="match-meta">${s.square_image_url ? 'Imagem quadrada cadastrada' : 'Sem imagem quadrada'} · ${s.rect_image_url ? 'Imagem retangular cadastrada' : 'Sem imagem retangular'}</div>
+      </div>
+    </div>
+    <div class="list-actions">
+      <a class="small-button ghost" href="/admin/patrocinador?id=${encodeURIComponent(s.sponsor_id)}">Editar</a>
+      <button class="small danger" data-delete-sponsor="${escapeHtml(s.sponsor_id)}">Excluir</button>
+    </div>
+  </div>`).join('');
+
+  container.querySelectorAll('[data-delete-sponsor]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Excluir este patrocinador?')) return;
+      const data = await adminFetch('/admin/delete-sponsor', {method: 'POST', body: JSON.stringify({sponsor_id: btn.dataset.deleteSponsor})});
+      adminState = data.state || await adminFetch('/admin/state');
+      preserveScroll(renderAll);
+      toast('Patrocinador excluído.');
     });
   });
 }
@@ -582,6 +624,22 @@ function setupEvents() {
   if (adminPrintButton) {
     adminPrintButton.addEventListener('click', () => {
       openMatchesPrintWindow(currentAdminFilteredMatches(), 'Lista de jogos do torneio', currentAdminFilterDescription());
+    });
+  }
+
+  const sponsorForm = document.getElementById('sponsor-form');
+  if (sponsorForm) {
+    sponsorForm.addEventListener('submit', async ev => {
+      ev.preventDefault();
+      const nameInput = document.getElementById('sponsor-name');
+      const data = await adminFetch('/admin/sponsor', {
+        method: 'POST',
+        body: JSON.stringify({name: nameInput.value})
+      });
+      nameInput.value = '';
+      adminState = data.state || await adminFetch('/admin/state');
+      preserveScroll(renderAll);
+      toast('Patrocinador adicionado.');
     });
   }
 

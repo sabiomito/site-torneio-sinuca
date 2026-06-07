@@ -91,7 +91,7 @@ function matchResultText(match) {
   if (!match.is_finished) return '<span class="badge pending">Pendente</span>';
   const p1Winner = match.winner_id === match.player1_id;
   const p2Winner = match.winner_id === match.player2_id;
-  return `<span class="score"><span class="${p1Winner ? 'winner' : ''}">${escapeHtml(match.player1_name)} ${match.balls_p1 || 0}</span> x <span class="${p2Winner ? 'winner' : ''}">${match.balls_p2 || 0} ${escapeHtml(match.player2_name)}</span></span>`;
+  return `<span class="score"><span class="${p1Winner ? 'winner' : ''}">${playerLinkHtml(match.player1_id, match.player1_name, 'player-link compact-link')} ${match.balls_p1 || 0}</span> x <span class="${p2Winner ? 'winner' : ''}">${match.balls_p2 || 0} ${playerLinkHtml(match.player2_id, match.player2_name, 'player-link compact-link')}</span></span>`;
 }
 
 function getFilteredMatches(matches, filters) {
@@ -106,6 +106,31 @@ function getFilteredMatches(matches, filters) {
   });
 }
 
+
+function slugifyPlayerName(name) {
+  return String(name || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'jogador';
+}
+
+function playerProfileUrl(playerOrName) {
+  const name = typeof playerOrName === 'string' ? playerOrName : (playerOrName?.name || playerOrName?.player1_name || '');
+  return `/perfil/${encodeURIComponent(slugifyPlayerName(name))}`;
+}
+
+function playerById(id) {
+  const list = window.CURRENT_STATE_PLAYERS || [];
+  return list.find(p => p.player_id === id) || null;
+}
+
+function playerLinkHtml(id, name, className = 'player-link') {
+  const p = playerById(id);
+  const href = p?.profile_url || playerProfileUrl(name);
+  return `<a class="${className}" href="${escapeHtml(href)}">${escapeHtml(name || '')}</a>`;
+}
 
 function statusText(rankStatus) {
   if (rankStatus === 'promotion') return 'Classificado';
@@ -274,9 +299,9 @@ function renderMatches(container, matches) {
           <div class="match-main">
             <span class="pill">${divisionName(match.division)} · Chave ${escapeHtml(normalizeChaveLabel(match.chave))} · Rodada ${escapeHtml(match.round_number || '-')}</span>
             <span class="time">${escapeHtml(match.time || '--:--')}</span>
-            <strong>${escapeHtml(match.player1_name)}</strong>
+            <strong>${playerLinkHtml(match.player1_id, match.player1_name)}</strong>
             <span class="versus">x</span>
-            <strong>${escapeHtml(match.player2_name)}</strong>
+            <strong>${playerLinkHtml(match.player2_id, match.player2_name)}</strong>
           </div>
           <div class="match-status">${matchResultText(match)}</div>
         </div>
