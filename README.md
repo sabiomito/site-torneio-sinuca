@@ -129,3 +129,9 @@ SECRET_KEY
 ## Correção v12
 
 - Corrigido o PDF/lista de impressão: quando uma partida já tem resultado salvo, o campo central agora mostra somente o placar numérico, por exemplo `7 x 3`, sem repetir os nomes dos jogadores.
+
+
+## Atualização v13
+
+- Adicionado logo do campeonato para card do WhatsApp/Open Graph, hero da página inicial e favicon transparente.
+- Adicionada tela de telão em `/telao` com atualização automática a cada 60 segundos.

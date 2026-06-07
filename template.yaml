@@ -105,6 +105,8 @@ Resources:
             request.uri = '/admin.html';
           } else if (request.uri === '/player' || request.uri === '/player/') {
             request.uri = '/player.html';
+          } else if (request.uri === '/telao' || request.uri === '/telao/' || request.uri === '/tv' || request.uri === '/tv/') {
+            request.uri = '/telao.html';
           } else if (request.uri === '/') {
             request.uri = '/index.html';
           }

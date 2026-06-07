@@ -406,3 +406,144 @@ tr.relegation td:first-child, .rank-relegation td:first-child { border-left: 4px
   .table-actions { justify-content: flex-start; }
   .standings-subtitle { align-items: flex-start; }
 }
+
+
+.hero-home {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr) 160px;
+  align-items: center;
+}
+.hero-logo-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.hero-logo-img {
+  width: 100%;
+  max-width: 210px;
+  height: auto;
+  filter: drop-shadow(0 12px 26px rgba(0,0,0,.28));
+}
+.hero-copy p:last-child { margin-bottom: 0; }
+.hero-tv-link {
+  justify-self: end;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  min-width: 130px;
+  padding: 18px 16px;
+  border-radius: 22px;
+  border: 1px solid rgba(40, 209, 124, 0.28);
+  background: rgba(7, 16, 24, 0.42);
+  color: var(--text);
+  box-shadow: 0 10px 30px rgba(0,0,0,.18);
+}
+.hero-tv-link:hover { text-decoration: none; background: rgba(17, 30, 43, 0.78); }
+.hero-tv-icon {
+  width: 66px;
+  height: 66px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 18px;
+  color: var(--accent);
+  background: rgba(40,209,124,.12);
+  border: 1px solid rgba(40,209,124,.35);
+}
+.hero-tv-icon svg { width: 34px; height: 34px; }
+.hero-tv-label { font-weight: 800; color: var(--text); text-align: center; }
+
+.telao-page {
+  overflow: hidden;
+  min-height: 100vh;
+  background: radial-gradient(circle at top left, #172b3d, var(--bg) 40%);
+}
+.telao-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 16px 18px 8px;
+}
+.telao-brand-wrap {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+.telao-brand-logo { width: 76px; height: 76px; object-fit: contain; }
+.telao-kicker {
+  color: var(--accent);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 1.4px;
+  font-weight: 800;
+}
+.telao-header h1 {
+  font-size: clamp(22px, 2.6vw, 38px);
+  margin: 4px 0 0;
+}
+.telao-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--muted);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.telao-grid {
+  height: calc(100vh - 104px);
+  padding: 0 18px 18px;
+  display: grid;
+  gap: 18px;
+  align-content: center;
+  overflow: hidden;
+}
+.telao-card {
+  margin: 0;
+  height: var(--telao-card-height, 320px);
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+}
+.telao-title { margin-bottom: 10px; }
+.telao-title h2 { font-size: clamp(18px, 2vw, 28px); }
+.telao-title span { font-size: 13px; }
+.telao-table-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+}
+.telao-table {
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.telao-table th, .telao-table td {
+  padding: 6px 7px;
+  font-size: clamp(11px, 1vw, 16px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.telao-table th { font-size: clamp(10px, .9vw, 14px); }
+.telao-table th:nth-child(2), .telao-table td:nth-child(2) { width: 26%; }
+.telao-table td:nth-child(1), .telao-table th:nth-child(1) { width: 6%; text-align: center; }
+.telao-table td:nth-child(3), .telao-table th:nth-child(3),
+.telao-table td:nth-child(4), .telao-table th:nth-child(4),
+.telao-table td:nth-child(5), .telao-table th:nth-child(5),
+.telao-table td:nth-child(6), .telao-table th:nth-child(6),
+.telao-table td:nth-child(7), .telao-table th:nth-child(7),
+.telao-table td:nth-child(8), .telao-table th:nth-child(8) { text-align: center; }
+.telao-table td:nth-child(9), .telao-table th:nth-child(9) { width: 14%; text-align: center; }
+
+@media (max-width: 900px) {
+  .hero-home { grid-template-columns: 1fr; justify-items: center; text-align: center; }
+  .hero-tv-link { justify-self: center; }
+  .hero-logo-img { max-width: 180px; }
+}
