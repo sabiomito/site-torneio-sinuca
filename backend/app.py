@@ -983,6 +983,56 @@ def calculate_standings(players, matches, results, config):
     return grouped
 
 
+
+def get_sponsors():
+    sponsors = scan_type("SPONSOR")
+    return sorted(sponsors, key=lambda s: str(s.get("name", "")).lower())
+
+
+def upsert_sponsor(data):
+    name = str(data.get("name", "")).strip()
+    if not name:
+        raise ValueError("Informe o nome do patrocinador.")
+    sponsor_id = str(data.get("sponsor_id") or data.get("id") or make_id("sponsor"))
+    for other in get_sponsors():
+        if other.get("sponsor_id") != sponsor_id and str(other.get("name", "")).strip().lower() == name.lower():
+            raise ValueError("Já existe um patrocinador com esse nome.")
+    current = get_item("SPONSOR", sponsor_id) or {}
+    item = {
+        "pk": "SPONSOR",
+        "sk": sponsor_id,
+        "type": "SPONSOR",
+        "sponsor_id": sponsor_id,
+        "name": name,
+        "square_image_url": current.get("square_image_url", ""),
+        "rect_image_url": current.get("rect_image_url", ""),
+        "created_at": current.get("created_at") or now_iso(),
+        "updated_at": now_iso(),
+    }
+    if data.get("square_image_data_url"):
+        item["square_image_url"] = save_jpeg_media(data.get("square_image_data_url"), f"media/sponsors/{sponsor_id}/square.jpg")
+    if data.get("rect_image_data_url"):
+        item["rect_image_url"] = save_jpeg_media(data.get("rect_image_data_url"), f"media/sponsors/{sponsor_id}/rect.jpg")
+    put_item(item)
+    return item
+
+
+def delete_sponsor(sponsor_id):
+    sponsor_id = str(sponsor_id or "")
+    if sponsor_id:
+        delete_item("SPONSOR", sponsor_id)
+
+
+def latest_finished_match(matches):
+    finished = [m for m in matches if m.get("is_finished")]
+    if not finished:
+        return None
+    return sorted(
+        finished,
+        key=lambda m: str(m.get("result_saved_at") or m.get("updated_at") or m.get("created_at") or ""),
+        reverse=True,
+    )[0]
+
 def public_state():
     config = get_config()
     players = [clean_public_player(p) for p in get_players()]
