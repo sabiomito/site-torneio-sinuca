@@ -116,7 +116,7 @@
       <section class="card collapsible closed" data-section="matches">
         <button class="collapse-title" type="button"><span>▾</span> Partidas e resultados</button>
         <div class="collapse-body">
-          <div class="filters grid-6 sticky-filters">
+          <div class="filters grid-7 sticky-filters">
             <label>Data
               <select id="admin-filter-date"><option value="">Todas</option></select>
             </label>
@@ -134,6 +134,13 @@
             </label>
             <label>Chave
               <select id="admin-filter-chave"><option value="">Todas</option></select>
+            </label>
+            <label>Status
+              <select id="admin-filter-status">
+                <option value="">Todos</option>
+                <option value="finished">Finalizada</option>
+                <option value="pending">Pendente</option>
+              </select>
             </label>
           </div>
           <div class="filter-actions-row">
@@ -157,6 +164,57 @@
           </form>
           <p class="muted">Depois de adicionar, clique em editar para enviar as imagens quadrada e retangular usadas no modo telão.</p>
           <div class="scroll-box" id="sponsors-list"></div>
+        </div>
+      </section>
+
+      <section class="card collapsible closed" data-section="tv-config">
+        <button class="collapse-title" type="button"><span>▾</span> Configurações do telão</button>
+        <div class="collapse-body">
+          <form id="tv-config-form" class="stack-form">
+            <div class="grid-3">
+              <label>Tempo da tabela, em segundos
+                <input type="number" id="tv-table-seconds" min="1" max="3600" required>
+              </label>
+              <label>Tempo dos patrocinadores, em segundos
+                <input type="number" id="tv-sponsor-seconds" min="1" max="3600" required>
+              </label>
+              <label>Tempo de cada partida, em segundos
+                <input type="number" id="tv-match-seconds" min="1" max="3600" required>
+              </label>
+            </div>
+            <div class="section-title compact-title">
+              <h3>Partidas exibidas</h3>
+              <span>sem filtros, o telão usa os últimos 20 resultados</span>
+            </div>
+            <div class="filters grid-7">
+              <label>Data
+                <select id="tv-filter-date"><option value="">Todas</option></select>
+              </label>
+              <label>Rodada
+                <select id="tv-filter-round"><option value="">Todas</option></select>
+              </label>
+              <label>Local
+                <select id="tv-filter-place"><option value="">Todos</option></select>
+              </label>
+              <label>Competidor
+                <select id="tv-filter-player"><option value="">Todos</option></select>
+              </label>
+              <label>Divisão
+                <select id="tv-filter-division"><option value="">Todas</option></select>
+              </label>
+              <label>Chave
+                <select id="tv-filter-chave"><option value="">Todas</option></select>
+              </label>
+              <label>Status
+                <select id="tv-filter-status">
+                  <option value="">Todos</option>
+                  <option value="finished">Finalizada</option>
+                  <option value="pending">Pendente</option>
+                </select>
+              </label>
+            </div>
+            <button id="save-tv-config" type="submit">Salvar configurações do telão</button>
+          </form>
         </div>
       </section>
 

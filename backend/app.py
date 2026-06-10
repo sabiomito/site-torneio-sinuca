@@ -9,6 +9,7 @@ import time
 import uuid
 from datetime import datetime
 from decimal import Decimal
+from html import escape as html_escape
 from itertools import combinations
 from urllib.parse import quote, unquote
 
@@ -67,6 +68,20 @@ def response(status, data=None, headers=None):
         "statusCode": status,
         "headers": base_headers,
         "body": json.dumps(data or {}, ensure_ascii=False, default=json_default),
+    }
+
+
+def html_response(status, body, headers=None):
+    base_headers = {
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "no-store",
+    }
+    if headers:
+        base_headers.update(headers)
+    return {
+        "statusCode": status,
+        "headers": base_headers,
+        "body": body,
     }
 
 
@@ -252,6 +267,26 @@ def available_chaves_for_division(config, division):
     return [chave_name(i) for i in range(1, key_count + 1)]
 
 
+TV_FILTER_KEYS = ("date", "round", "place", "player", "division", "chave", "status")
+
+
+def normalize_tv_config(raw=None):
+    raw = raw or {}
+    filters_in = raw.get("filters") or {}
+    filters = {
+        key: str(filters_in.get(key, "") or "").strip()
+        for key in TV_FILTER_KEYS
+    }
+    if filters["status"] not in {"finished", "pending"}:
+        filters["status"] = ""
+    return {
+        "table_seconds": normalize_int(raw.get("table_seconds"), 60, 1, 3600),
+        "sponsor_seconds": normalize_int(raw.get("sponsor_seconds"), 30, 1, 3600),
+        "match_seconds": normalize_int(raw.get("match_seconds"), 5, 1, 3600),
+        "filters": filters,
+    }
+
+
 def time_to_minutes(time_str):
     dt = datetime.strptime(str(time_str), "%H:%M")
     return dt.hour * 60 + dt.minute
@@ -375,6 +410,7 @@ def get_config():
                 "1": {"key_count": 1, "promotion_count": 0, "relegation_count": 0},
                 "2": {"key_count": 1, "promotion_count": 0, "relegation_count": 0},
             },
+            "tv_config": normalize_tv_config(),
             "created_at": now_iso(),
         }
         put_item(item)
@@ -388,6 +424,7 @@ def get_config():
             "promotion_count": normalize_int(raw.get("promotion_count", 0), 0, 0, 100),
             "relegation_count": normalize_int(raw.get("relegation_count", 0), 0, 0, 100),
         }
+    item["tv_config"] = normalize_tv_config(item.get("tv_config"))
     return item
 
 
@@ -417,6 +454,13 @@ def save_config(data):
     return current
 
 
+def save_tv_config(data):
+    current = get_config()
+    current["tv_config"] = normalize_tv_config(data)
+    put_item(current)
+    return current["tv_config"]
+
+
 def get_players():
     config = get_config()
     players = scan_type("PLAYER")
@@ -444,6 +488,62 @@ def get_rounds():
 def get_matches():
     matches = scan_type("MATCH")
     return sorted(matches, key=lambda m: (m.get("date") or "9999-99-99", m.get("time") or "99:99", m.get("place_name", ""), m.get("round_number", 999), m.get("chave", "A")))
+
+
+def match_passes_filters(match, filters):
+    filters = filters or {}
+    if filters.get("date") and str(match.get("date") or "") != str(filters["date"]):
+        return False
+    if filters.get("round") and str(match.get("round_id") or "") != str(filters["round"]):
+        return False
+    if filters.get("place") and str(match.get("place_id") or "") != str(filters["place"]):
+        return False
+    if filters.get("player") and str(filters["player"]) not in {
+        str(match.get("player1_id") or ""),
+        str(match.get("player2_id") or ""),
+    }:
+        return False
+    if filters.get("division") and str(match.get("division") or "") != str(filters["division"]):
+        return False
+    if filters.get("chave") and normalize_chave(match.get("chave")) != normalize_chave(filters["chave"]):
+        return False
+    if filters.get("status") == "finished" and not match.get("is_finished"):
+        return False
+    if filters.get("status") == "pending" and match.get("is_finished"):
+        return False
+    return True
+
+
+def filtered_matches(matches, filters):
+    return [match for match in matches if match_passes_filters(match, filters)]
+
+
+def tv_cycle_matches(matches, tv_config):
+    filters = (tv_config or {}).get("filters") or {}
+    if any(str(filters.get(key) or "").strip() for key in TV_FILTER_KEYS):
+        selected = filtered_matches(matches, filters)
+    else:
+        finished = [match for match in matches if match.get("is_finished")]
+        selected = sorted(
+            finished,
+            key=lambda match: str(
+                match.get("result_saved_at")
+                or match.get("updated_at")
+                or match.get("created_at")
+                or ""
+            ),
+            reverse=True,
+        )[:20]
+    return sorted(
+        selected,
+        key=lambda match: (
+            match.get("date") or "9999-99-99",
+            match.get("time") or "99:99",
+            match.get("place_name") or "",
+            normalize_int(match.get("round_number"), 999),
+            match.get("match_id") or "",
+        ),
+    )
 
 
 def get_results():
@@ -544,10 +644,19 @@ def round_requirements(config, players, rounds, matches, results):
             ps = grouped.get((division, chave), [])
             total_pairs = len(ps) * (len(ps) - 1) // 2
             all_keys = all_pair_keys_for_group(ps, division, chave)
-            done_or_scheduled = len(all_keys & used_pairs)
+            remaining_keys = all_keys - used_pairs
+            done_or_scheduled = len(all_keys) - len(remaining_keys)
             remaining_pairs = max(0, total_pairs - done_or_scheduled)
             per_round = matches_per_round(len(ps))
-            missing_rounds = 0 if per_round == 0 else (remaining_pairs + per_round - 1) // per_round
+            pending_by_player = {str(player["player_id"]): 0 for player in ps}
+            for first, second in combinations(ps, 2):
+                pair_key = build_pair_key(division, chave, first["player_id"], second["player_id"])
+                if pair_key in remaining_keys:
+                    pending_by_player[str(first["player_id"])] += 1
+                    pending_by_player[str(second["player_id"])] += 1
+            capacity_rounds = 0 if per_round == 0 else (remaining_pairs + per_round - 1) // per_round
+            player_rounds = max(pending_by_player.values(), default=0)
+            missing_rounds = max(capacity_rounds, player_rounds)
             complete_rounds_remaining = 0 if per_round == 0 else remaining_pairs // per_round
             partial_round_games = 0 if per_round == 0 else remaining_pairs % per_round
             games_missing_to_full_round = 0
@@ -719,8 +828,17 @@ def find_automatic_pairs(players, division, chave, used_pairs, seed=None):
     rng.shuffle(players)
     target = matches_per_round(len(players))
     best = []
+    seen = {}
 
-    def rec(remaining, pairs, bye_used):
+    def available_partners(player, remaining):
+        return [
+            other
+            for other in remaining
+            if other["player_id"] != player["player_id"]
+            and build_pair_key(division, chave, player["player_id"], other["player_id"]) not in used_pairs
+        ]
+
+    def rec(remaining, pairs):
         nonlocal best
         if len(pairs) > len(best):
             best = pairs[:]
@@ -728,23 +846,32 @@ def find_automatic_pairs(players, division, chave, used_pairs, seed=None):
             return True
         if len(remaining) < 2:
             return False
-        first = remaining[0]
-        rest = remaining[1:]
-        partners = rest[:]
+        if len(pairs) + len(remaining) // 2 <= len(best):
+            return False
+
+        state = tuple(sorted(str(player["player_id"]) for player in remaining))
+        if seen.get(state, -1) >= len(pairs):
+            return False
+        seen[state] = len(pairs)
+
+        # Começar pelo jogador com menos opções reduz bastante a busca e,
+        # numa rodada parcial, permite ignorar quem já enfrentou todos.
+        first = min(remaining, key=lambda player: len(available_partners(player, remaining)))
+        rest = [player for player in remaining if player["player_id"] != first["player_id"]]
+        partners = available_partners(first, remaining)
         rng.shuffle(partners)
         for partner in partners:
-            pair_key = build_pair_key(division, chave, first["player_id"], partner["player_id"])
-            if pair_key in used_pairs:
-                continue
             next_remaining = [p for p in rest if p["player_id"] != partner["player_id"]]
-            if rec(next_remaining, pairs + [(first, partner)], bye_used):
+            if rec(next_remaining, pairs + [(first, partner)]):
                 return True
-        if len(players) % 2 == 1 and not bye_used:
-            if rec(rest, pairs, True):
-                return True
+
+        # Rodadas finais podem ser parciais mesmo com uma chave de tamanho par.
+        # Portanto qualquer jogador sem confronto disponível pode ficar de fora.
+        if rec(rest, pairs):
+            return True
         return False
 
-    rec(players, [], False)
+    rec(players, [])
     return best
 
 
@@ -1078,7 +1205,90 @@ def latest_finished_match(matches):
         reverse=True,
     )[0]
 
-def public_state():
+
+def request_origin(event):
+    headers = {
+        str(key).lower(): str(value)
+        for key, value in (event.get("headers") or {}).items()
+    }
+    host = headers.get("x-site-host") or headers.get("x-forwarded-host") or headers.get("host") or ""
+    if not host:
+        return ""
+    scheme = headers.get("x-forwarded-proto") or "https"
+    if host.startswith("localhost") or host.startswith("127.0.0.1"):
+        scheme = "http"
+    return f"{scheme}://{host}".rstrip("/")
+
+
+def absolute_site_url(origin, path):
+    value = str(path or "")
+    if value.startswith("http://") or value.startswith("https://"):
+        return value
+    if not value.startswith("/"):
+        value = "/" + value
+    return origin + value if origin else value
+
+
+def profile_html(event, slug):
+    players = [clean_public_player(player) for player in get_players()]
+    target = slugify_name(unquote(slug or ""))
+    player = next((item for item in players if item.get("slug") == target), None)
+    origin = request_origin(event)
+    profile_path = f"/perfil/{quote(target)}"
+    if player:
+        title = f"Perfil de {player.get('name', '')} do 2° Campeonato de Sinuca de Entre Folhas"
+        description = player.get("short_message") or "Perfil do jogador no campeonato de sinuca de Entre Folhas."
+        image_path = player.get("photo_url") or "/img/entre-folhas-logo-card.png"
+    else:
+        title = "Perfil do jogador do 2° Campeonato de Sinuca de Entre Folhas"
+        description = "Perfil do jogador no campeonato de sinuca de Entre Folhas."
+        image_path = "/img/entre-folhas-logo-card.png"
+    image_url = absolute_site_url(origin, image_path)
+    page_url = absolute_site_url(origin, profile_path)
+    safe_title = html_escape(title, quote=True)
+    safe_description = html_escape(description, quote=True)
+    safe_image = html_escape(image_url, quote=True)
+    safe_page_url = html_escape(page_url, quote=True)
+    return f"""<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{safe_title}</title>
+  <meta property="og:title" content="{safe_title}">
+  <meta property="og:description" content="{safe_description}">
+  <meta property="og:type" content="profile">
+  <meta property="og:url" content="{safe_page_url}">
+  <meta property="og:image" content="{safe_image}">
+  <meta property="og:image:alt" content="Foto de perfil do jogador">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{safe_title}">
+  <meta name="twitter:description" content="{safe_description}">
+  <meta name="twitter:image" content="{safe_image}">
+  <link rel="icon" type="image/png" href="/img/favicon.png">
+  <link rel="apple-touch-icon" href="/img/favicon-180.png">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/index.html">🎱 Segundo campeonato municipal de sinuca de Entre Folhas</a>
+    <nav>
+      <a href="/index.html">Placar</a>
+      <a href="/telao">Telão</a>
+      <a href="/admin">Admin</a>
+    </nav>
+  </header>
+  <main class="container">
+    <section id="profile-root" class="profile-page"></section>
+  </main>
+  <script src="/config.js"></script>
+  <script src="/js/api.js"></script>
+  <script src="/js/profile.js"></script>
+</body>
+</html>"""
+
+
+def public_state(include_matches=True):
     config = get_config()
     players = [clean_public_player(p) for p in get_players()]
     rounds = get_rounds()
@@ -1094,14 +1304,15 @@ def public_state():
         "config": config,
         "players": players,
         "rounds": rounds,
-        "matches": matches,
-        "results": results,
+        "matches": matches if include_matches else [],
+        "results": results if include_matches else [],
         "sponsors": sponsors,
         "dates": dates,
         "places": places,
         "standings": standings,
         "round_requirements": requirements,
-        "latest_result": latest_result,
+        "latest_result": latest_result if include_matches else None,
+        "tv_matches": tv_cycle_matches(matches, config.get("tv_config")) if include_matches else [],
     }
 
 
@@ -1113,6 +1324,9 @@ def handle_admin_mutation(event, action):
         if action == "config":
             cfg = save_config(data)
             return response(200, {"config": cfg, "state": public_state()})
+        if action == "tv-config":
+            cfg = save_tv_config(data)
+            return response(200, {"tv_config": cfg, "state": public_state()})
         if action == "player":
             item = upsert_player(data)
             return response(200, {"player": item, "state": public_state()})
@@ -1173,7 +1387,19 @@ def lambda_handler(event, context):
         if method == "GET" and path in ["/state", "/admin/state"]:
             if path == "/admin/state" and not require_admin(event):
                 return response(401, {"error": "Sessão expirada ou inválida."})
-            return response(200, public_state())
+            include_matches = str(get_query_params(event).get("include_matches", "1")).lower() not in {"0", "false", "no"}
+            return response(200, public_state(include_matches=include_matches))
+
+        if method == "GET" and path == "/matches":
+            query = get_query_params(event)
+            filters = {key: str(query.get(key, "") or "").strip() for key in TV_FILTER_KEYS}
+            if filters["status"] not in {"finished", "pending"}:
+                filters["status"] = ""
+            return response(200, {"matches": filtered_matches(get_matches(), filters)})
+
+        if method in {"GET", "HEAD"} and (path == "/perfil" or path.startswith("/perfil/")):
+            slug = path.split("/perfil/", 1)[1] if path.startswith("/perfil/") else ""
+            return html_response(200, profile_html(event, slug))
 
         if method == "GET" and path.startswith("/player/"):
             player_id = path.split("/player/", 1)[1]

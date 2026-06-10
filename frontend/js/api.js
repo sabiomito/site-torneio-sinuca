@@ -102,6 +102,8 @@ function getFilteredMatches(matches, filters) {
     if (filters.division && String(match.division) !== String(filters.division)) return false;
     if (filters.chave && normalizeChaveLabel(match.chave) !== normalizeChaveLabel(filters.chave)) return false;
     if (filters.round && match.round_id !== filters.round) return false;
+    if (filters.status === 'finished' && !match.is_finished) return false;
+    if (filters.status === 'pending' && match.is_finished) return false;
     return true;
   });
 }

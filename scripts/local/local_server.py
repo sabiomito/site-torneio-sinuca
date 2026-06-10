@@ -56,8 +56,6 @@ def query_params(query):
 
 def static_path_for(url_path):
     path = unquote(url_path)
-    if path.startswith("/perfil/") or path in {"/perfil", "/perfil/"}:
-        return FRONTEND_ROOT / "perfil.html"
     rewritten = ROUTES.get(path, path)
     relative = rewritten.lstrip("/")
     candidate = (FRONTEND_ROOT / relative).resolve()
@@ -96,6 +94,9 @@ class DevHandler(BaseHTTPRequestHandler):
             self.send_bytes(200, b"ok\n", {"Content-Type": "text/plain; charset=utf-8"}, head_only)
             return
         if parsed.path == "/api" or parsed.path.startswith("/api/"):
+            self.handle_api(head_only=head_only)
+            return
+        if parsed.path == "/perfil" or parsed.path == "/perfil/" or parsed.path.startswith("/perfil/"):
             self.handle_api(head_only=head_only)
             return
         if parsed.path.startswith("/media/"):

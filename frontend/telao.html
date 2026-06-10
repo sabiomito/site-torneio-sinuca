@@ -17,11 +17,21 @@
       </div>
     </div>
     <div class="telao-meta">
-      <span id="telao-last-update">Carregando...</span>
+      <div class="telao-tool-group">
+        <button id="telao-zoom-out" class="telao-icon-button" type="button" title="Diminuir zoom" aria-label="Diminuir zoom">−</button>
+        <button id="telao-zoom-in" class="telao-icon-button" type="button" title="Aumentar zoom" aria-label="Aumentar zoom">+</button>
+        <div class="telao-radio-picker">
+          <button id="telao-radio-menu-button" class="telao-icon-button" type="button" title="Selecionar rádio" aria-label="Selecionar rádio" aria-expanded="false">♫</button>
+          <div id="telao-radio-menu" class="telao-radio-menu hidden" role="menu"></div>
+        </div>
+        <button id="telao-radio-toggle" class="telao-icon-button" type="button" title="Ligar rádio" aria-label="Ligar rádio">🔇</button>
+      </div>
       <a href="/index.html" class="secondary button">Voltar ao placar</a>
+      <span id="telao-countdown">Carregando...</span>
     </div>
   </header>
   <main id="telao-grid" class="telao-grid"></main>
+  <audio id="telao-radio-audio" preload="none"></audio>
   <script src="/config.js"></script>
   <script src="/js/api.js"></script>
   <script src="/js/telao.js"></script>

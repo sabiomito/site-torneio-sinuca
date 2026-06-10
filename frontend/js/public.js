@@ -1,4 +1,5 @@
 let state = null;
+let matchesRequestId = 0;
 
 function normalizeChave(value) {
   return String(value || 'A').trim().toUpperCase() || 'A';
@@ -22,11 +23,11 @@ async function loadPublicState() {
   const standingsEl = document.getElementById('standings');
   const matchesEl = document.getElementById('matches');
   try {
-    state = await apiFetch('/state');
+    state = await apiFetch('/state?include_matches=0');
     window.CURRENT_STATE_PLAYERS = state.players || [];
     setupFilters();
     renderStandings();
-    renderFilteredMatches();
+    renderMatchesPrompt();
   } catch (err) {
     standingsEl.innerHTML = `<section class="card"><div class="empty">${escapeHtml(err.message)}</div></section>`;
     matchesEl.innerHTML = '';
@@ -39,12 +40,14 @@ function setupFilters() {
   fillSelect(document.getElementById('filter-player'), state.players, 'player_id', p => `${p.name} — ${divisionName(p.division)} / Chave ${normalizeChave(p.chave)}`, 'Todos');
   fillDivisionSelect(document.getElementById('filter-division'), state.config.division_count, 'Todas');
   fillChaveSelect(document.getElementById('filter-chave'), 'Todas');
-  ['filter-date','filter-place','filter-player','filter-division','filter-chave'].forEach(id => {
-    document.getElementById(id).addEventListener('change', renderFilteredMatches);
+  ['filter-date','filter-place','filter-player','filter-division','filter-chave','filter-status'].forEach(id => {
+    document.getElementById(id).addEventListener('change', loadFilteredMatches);
   });
   document.getElementById('clear-filters').addEventListener('click', () => {
-    ['filter-date','filter-place','filter-player','filter-division','filter-chave'].forEach(id => document.getElementById(id).value = '');
-    renderFilteredMatches();
+    ['filter-date','filter-place','filter-player','filter-division','filter-chave','filter-status'].forEach(id => document.getElementById(id).value = '');
+    state.matches = [];
+    matchesRequestId += 1;
+    renderMatchesPrompt();
   });
   const printButton = document.getElementById('print-filtered-matches');
   if (printButton) {
@@ -62,11 +65,45 @@ function currentFilters() {
     player: document.getElementById('filter-player').value,
     division: document.getElementById('filter-division').value,
     chave: document.getElementById('filter-chave').value,
+    status: document.getElementById('filter-status').value,
   };
 }
 
 function currentFilteredMatches() {
-  return getFilteredMatches(state.matches, currentFilters());
+  return state.matches || [];
+}
+
+function hasActiveMatchFilters(filters) {
+  return Object.values(filters).some(Boolean);
+}
+
+async function loadFilteredMatches() {
+  const filters = currentFilters();
+  if (!hasActiveMatchFilters(filters)) {
+    state.matches = [];
+    matchesRequestId += 1;
+    renderMatchesPrompt();
+    return;
+  }
+  const requestId = ++matchesRequestId;
+  const count = document.getElementById('matches-count');
+  const container = document.getElementById('matches');
+  count.textContent = 'Carregando...';
+  container.innerHTML = '<div class="empty">Buscando partidas...</div>';
+  try {
+    const query = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value) query.set(key, value);
+    });
+    const data = await apiFetch(`/matches?${query.toString()}`);
+    if (requestId !== matchesRequestId) return;
+    state.matches = data.matches || [];
+    renderFilteredMatches();
+  } catch (err) {
+    if (requestId !== matchesRequestId) return;
+    count.textContent = '';
+    container.innerHTML = `<div class="empty">${escapeHtml(err.message)}</div>`;
+  }
 }
 
 function optionText(id) {
@@ -82,6 +119,7 @@ function currentFilterDescription() {
     optionText('filter-player') && `Competidor: ${optionText('filter-player')}`,
     optionText('filter-division') && `Divisão: ${optionText('filter-division')}`,
     optionText('filter-chave') && `Chave: ${optionText('filter-chave')}`,
+    optionText('filter-status') && `Status: ${optionText('filter-status')}`,
   ].filter(Boolean);
   return parts.length ? parts.join(' · ') : 'Todos os jogos exibidos no filtro atual';
 }
@@ -429,7 +467,17 @@ function renderFilteredMatches() {
   const filtered = currentFilteredMatches();
   const count = document.getElementById('matches-count');
   if (count) count.textContent = `${filtered.length} partidas`;
+  const printButton = document.getElementById('print-filtered-matches');
+  if (printButton) printButton.disabled = false;
   renderMatches(document.getElementById('matches'), filtered);
+}
+
+function renderMatchesPrompt() {
+  const count = document.getElementById('matches-count');
+  if (count) count.textContent = '';
+  const printButton = document.getElementById('print-filtered-matches');
+  if (printButton) printButton.disabled = true;
+  document.getElementById('matches').innerHTML = '<div class="empty">Selecione ao menos um filtro para carregar as partidas.</div>';
 }
 
 loadPublicState();

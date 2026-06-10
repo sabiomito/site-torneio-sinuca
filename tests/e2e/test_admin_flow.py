@@ -111,8 +111,17 @@ def test_admin_flow_creates_round_and_public_score(driver):
         )
     )
 
+    Select(driver.find_element(By.ID, "admin-filter-status")).select_by_value("finished")
+    wait(driver).until(lambda browser: len(browser.find_elements(By.CSS_SELECTOR, "#admin-matches .result-form")) == 1)
+    Select(driver.find_element(By.ID, "admin-filter-status")).select_by_value("pending")
+    wait(driver).until(lambda browser: len(browser.find_elements(By.CSS_SELECTOR, "#admin-matches .result-form")) == 0)
+
     driver.get(f"{BASE_URL}/")
     wait(driver).until(EC.text_to_be_present_in_element((By.ID, "standings"), "Teste Alpha"))
+    assert "Selecione ao menos um filtro" in driver.find_element(By.ID, "matches").text
+    assert not driver.find_elements(By.CSS_SELECTOR, "#matches .match-row")
+    Select(driver.find_element(By.ID, "filter-status")).select_by_value("finished")
+    wait(driver).until(lambda browser: len(browser.find_elements(By.CSS_SELECTOR, "#matches .match-row")) == 1)
     standings_text = driver.find_element(By.ID, "standings").text
     assert "Teste Beta" in standings_text
     assert "3" in standings_text

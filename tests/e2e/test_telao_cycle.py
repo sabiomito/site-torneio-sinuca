@@ -15,11 +15,11 @@ def test_real_telao_cycle_with_existing_local_data(driver):
             return typeof telaoState !== 'undefined'
               && telaoState
               && telaoState.sponsors.length
-              && telaoState.latest_result
+              && telaoState.tv_matches.length > 1
               ? telaoState
               : null;
             """
         )
     )
     assert len(driver.find_elements(By.CSS_SELECTOR, "#telao-grid")) == 1
-    validate_telao(driver, state["sponsors"], state["latest_result"])
+    validate_telao(driver, state["sponsors"], state["tv_matches"], state["config"]["tv_config"])

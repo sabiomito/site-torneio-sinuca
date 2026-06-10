@@ -58,9 +58,9 @@
     <section class="card">
       <div class="section-title">
         <h2>Filtrar jogos</h2>
-        <span>por data, local, competidor, divisão e/ou chave</span>
+        <span>por data, local, competidor, divisão, chave e/ou status</span>
       </div>
-      <div class="filters grid-5 public-filter-form">
+      <div class="filters grid-6 public-filter-form">
         <label>Data
           <select id="filter-date"><option value="">Todas</option></select>
         </label>
@@ -75,6 +75,13 @@
         </label>
         <label>Chave
           <select id="filter-chave"><option value="">Todas</option></select>
+        </label>
+        <label>Status
+          <select id="filter-status">
+            <option value="">Todos</option>
+            <option value="finished">Finalizada</option>
+            <option value="pending">Pendente</option>
+          </select>
         </label>
       </div>
       <div class="filter-actions-row">

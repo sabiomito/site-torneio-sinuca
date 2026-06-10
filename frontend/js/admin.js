@@ -144,6 +144,39 @@ function fillDivisionAndKeyControls() {
   fillChaveSelect(document.getElementById('round-chave'), Number(document.getElementById('round-division').value || 1));
 }
 
+function renderTvConfig() {
+  const tv = adminState.config.tv_config || {
+    table_seconds: 60,
+    sponsor_seconds: 30,
+    match_seconds: 5,
+    filters: {},
+  };
+  const filters = tv.filters || {};
+  document.getElementById('tv-table-seconds').value = tv.table_seconds || 60;
+  document.getElementById('tv-sponsor-seconds').value = tv.sponsor_seconds || 30;
+  document.getElementById('tv-match-seconds').value = tv.match_seconds || 5;
+  fillSelect(document.getElementById('tv-filter-date'), adminState.dates, 'date', d => fmtDate(d.date), 'Todas');
+  fillSelect(document.getElementById('tv-filter-place'), adminState.places, 'place_id', 'name', 'Todos');
+  fillSelect(document.getElementById('tv-filter-player'), adminState.players, 'player_id', p => `${p.name} — ${divisionName(p.division)} / Chave ${normalizeChave(p.chave)}`, 'Todos');
+  fillSelect(document.getElementById('tv-filter-round'), adminState.rounds, 'round_id', r => `${fmtDate(r.date)} · ${r.name} · ${divisionName(r.division)} · Chave ${normalizeChave(r.chave)} · Rodada ${r.round_number || ''}`, 'Todas');
+  fillDivisionSelect(document.getElementById('tv-filter-division'), adminState.config.division_count, 'Todas');
+  fillAllChavesFilter(document.getElementById('tv-filter-chave'), 'Todas');
+  Object.entries({
+    'tv-filter-date': filters.date,
+    'tv-filter-round': filters.round,
+    'tv-filter-place': filters.place,
+    'tv-filter-player': filters.player,
+    'tv-filter-division': filters.division,
+    'tv-filter-chave': filters.chave,
+    'tv-filter-status': filters.status,
+  }).forEach(([id, value]) => {
+    const select = document.getElementById(id);
+    if ([...select.options].some(option => option.value === String(value || ''))) {
+      select.value = String(value || '');
+    }
+  });
+}
+
 function renderAll() {
   adminState.rounds = adminState.rounds || [];
   adminState.matches = adminState.matches || [];
@@ -159,6 +192,7 @@ function renderAll() {
   fillSelect(document.getElementById('admin-filter-player'), adminState.players, 'player_id', p => `${p.name} — ${divisionName(p.division)} / Chave ${normalizeChave(p.chave)}`, 'Todos');
   fillSelect(document.getElementById('admin-filter-round'), adminState.rounds, 'round_id', r => `${fmtDate(r.date)} · ${r.name} · ${divisionName(r.division)} · Chave ${normalizeChave(r.chave)} · Rodada ${r.round_number || ''}`, 'Todas');
   fillAllChavesFilter(document.getElementById('admin-filter-chave'), 'Todas');
+  renderTvConfig();
   renderRoundRequirements();
   renderPlayersList();
   renderRoundsList();
@@ -184,7 +218,7 @@ function renderRoundRequirements() {
       <span>${req.players} jogador(es)</span>
       <span>${req.remaining_pairs} jogo(s)/confronto(s) pendente(s)</span>
       <span>${perRound} jogo(s) por rodada cheia</span>
-      <b>${req.missing_rounds} rodada(s) faltando</b>
+      <b>Pelo menos ${req.missing_rounds} rodada(s) faltando</b>
       ${partialText}
     </div>`;
   }).join('')}</div>`;
@@ -457,6 +491,7 @@ function currentAdminMatchFilters() {
     player: document.getElementById('admin-filter-player').value,
     division: document.getElementById('admin-filter-division').value,
     chave: document.getElementById('admin-filter-chave').value,
+    status: document.getElementById('admin-filter-status').value,
   };
 }
 
@@ -474,6 +509,7 @@ function currentAdminFilterDescription() {
     adminOptionText('admin-filter-player') && `Competidor: ${adminOptionText('admin-filter-player')}`,
     adminOptionText('admin-filter-division') && `Divisão: ${adminOptionText('admin-filter-division')}`,
     adminOptionText('admin-filter-chave') && `Chave: ${adminOptionText('admin-filter-chave')}`,
+    adminOptionText('admin-filter-status') && `Status: ${adminOptionText('admin-filter-status')}`,
   ].filter(Boolean);
   return parts.length ? parts.join(' · ') : 'Todos os jogos exibidos no filtro atual';
 }
@@ -587,6 +623,30 @@ function setupEvents() {
     toast('Configurações salvas.');
   });
 
+  document.getElementById('tv-config-form').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const data = await adminFetch('/admin/tv-config', {
+      method: 'POST',
+      body: JSON.stringify({
+        table_seconds: Number(document.getElementById('tv-table-seconds').value || 60),
+        sponsor_seconds: Number(document.getElementById('tv-sponsor-seconds').value || 30),
+        match_seconds: Number(document.getElementById('tv-match-seconds').value || 5),
+        filters: {
+          date: document.getElementById('tv-filter-date').value,
+          round: document.getElementById('tv-filter-round').value,
+          place: document.getElementById('tv-filter-place').value,
+          player: document.getElementById('tv-filter-player').value,
+          division: document.getElementById('tv-filter-division').value,
+          chave: document.getElementById('tv-filter-chave').value,
+          status: document.getElementById('tv-filter-status').value,
+        },
+      }),
+    });
+    adminState = data.state || await adminFetch('/admin/state');
+    preserveScroll(renderAll);
+    toast('Configurações do telão salvas.');
+  });
+
   document.getElementById('player-division').addEventListener('change', ev => fillChaveSelect(document.getElementById('player-chave'), Number(ev.target.value || 1)));
   document.getElementById('round-division').addEventListener('change', ev => fillChaveSelect(document.getElementById('round-chave'), Number(ev.target.value || 1)));
 
@@ -613,11 +673,11 @@ function setupEvents() {
     try { prepareManualRound(); } catch (err) { toast(err.message); }
   });
 
-  ['admin-filter-date','admin-filter-round','admin-filter-place','admin-filter-player','admin-filter-division','admin-filter-chave'].forEach(id => {
+  ['admin-filter-date','admin-filter-round','admin-filter-place','admin-filter-player','admin-filter-division','admin-filter-chave','admin-filter-status'].forEach(id => {
     document.getElementById(id).addEventListener('change', renderAdminMatches);
   });
   document.getElementById('admin-clear-filters').addEventListener('click', () => {
-    ['admin-filter-date','admin-filter-round','admin-filter-place','admin-filter-player','admin-filter-division','admin-filter-chave'].forEach(id => document.getElementById(id).value = '');
+    ['admin-filter-date','admin-filter-round','admin-filter-place','admin-filter-player','admin-filter-division','admin-filter-chave','admin-filter-status'].forEach(id => document.getElementById(id).value = '');
     renderAdminMatches();
   });
   const adminPrintButton = document.getElementById('admin-print-filtered-matches');

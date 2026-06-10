@@ -542,15 +542,21 @@ def validate_public_filters_share_and_pdf(driver, state):
     wait(driver).until(EC.text_to_be_present_in_element((By.ID, "standings"), "D1A-Jogador-01"))
     assert len(driver.find_elements(By.CSS_SELECTOR, ".standings-card")) == 2
     assert len(driver.find_elements(By.CSS_SELECTOR, ".chave-block")) == 3
+    assert "Selecione ao menos um filtro" in driver.find_element(By.ID, "matches").text
+    assert not driver.find_elements(By.CSS_SELECTOR, "#matches .match-row")
 
     sala_azul_id = next(place["place_id"] for place in state["places"] if place["name"] == "Sala Azul")
     select_value(driver, "filter-place", sala_azul_id)
     select_value(driver, "filter-division", 2)
     select_value(driver, "filter-chave", "A")
+    select_value(driver, "filter-status", "finished")
     expected_matches = [
         match
         for match in state["matches"]
-        if match["place_name"] == "Sala Azul" and match["division"] == 2 and match["chave"] == "A"
+        if match["place_name"] == "Sala Azul"
+        and match["division"] == 2
+        and match["chave"] == "A"
+        and match["is_finished"]
     ]
     wait(driver).until(
         lambda browser: browser.find_element(By.ID, "matches-count").text == f"{len(expected_matches)} partidas"
@@ -610,6 +616,29 @@ def validate_player_profile(driver, player, state):
     assert "Próximo jogo" in root.text
     assert len(driver.find_elements(By.CSS_SELECTOR, "#profile-root .match-row")) == len(matches)
     assert driver.find_element(By.CSS_SELECTOR, ".profile-photo").get_attribute("src").endswith(player["photo_url"])
+    profile_html = get_bytes(player["profile_url"]).decode("utf-8")
+    expected_title = f"Perfil de {player['name']} do 2° Campeonato de Sinuca de Entre Folhas"
+    assert f'<meta property="og:title" content="{expected_title}">' in profile_html
+    assert f'{player["photo_url"]}"' in profile_html
+
+
+def configure_telao_through_ui(driver):
+    progress("Configurando tempos e filtro do telao pelo painel...")
+    open_admin(driver)
+    open_section(driver, "tv-config")
+    set_input(driver, "tv-table-seconds", "8")
+    set_input(driver, "tv-sponsor-seconds", "4")
+    set_input(driver, "tv-match-seconds", "2")
+    select_value(driver, "tv-filter-status", "finished")
+    driver.find_element(By.ID, "tv-config-form").submit()
+    return wait_admin_state(
+        driver,
+        lambda current: current["config"]["tv_config"]["table_seconds"] == 8
+        and current["config"]["tv_config"]["sponsor_seconds"] == 4
+        and current["config"]["tv_config"]["match_seconds"] == 2
+        and current["config"]["tv_config"]["filters"]["status"] == "finished"
+        and len(current["tv_matches"]) >= 2,
+    )
 
 
 def current_sponsor_shape(driver):
@@ -621,18 +650,72 @@ def current_sponsor_shape(driver):
     return False
 
 
-def validate_telao(driver, sponsors, latest_result):
-    progress("Validando o ciclo real do telao: tabelas por 120s, patrocinadores por 20s e resultado por 20s...")
+def validate_telao(driver, sponsors, matches, tv_config):
+    table_seconds = tv_config["table_seconds"]
+    sponsor_seconds = tv_config["sponsor_seconds"]
+    match_seconds = tv_config["match_seconds"]
+    progress(
+        "Validando ciclo configurado do telao, radio, zoom, contagem regressiva e layout wide..."
+    )
+    assert len(matches) >= 2
+    assert matches == sorted(
+        matches,
+        key=lambda item: (
+            item.get("date") or "9999-99-99",
+            item.get("time") or "99:99",
+            item.get("place_name") or "",
+            item.get("round_number", 999),
+            item.get("match_id") or "",
+        ),
+    )
+
     driver.set_window_size(1920, 1080)
     driver.get(f"{BASE_URL}/telao")
     wait(driver).until(EC.text_to_be_present_in_element((By.ID, "telao-grid"), "D1A-Jogador"))
-
     wait(driver).until(lambda browser: len(browser.find_elements(By.CSS_SELECTOR, ".telao-card")) == 3)
+    tables_started_at = time.monotonic()
+
+    countdown_text = driver.find_element(By.ID, "telao-countdown").text
+    first_countdown = int(re.search(r"(\d+)s", countdown_text).group(1))
+    time.sleep(min(1.1, table_seconds / 2))
+    second_countdown = int(re.search(r"(\d+)s", driver.find_element(By.ID, "telao-countdown").text).group(1))
+    assert second_countdown < first_countdown
+
+    click(driver, driver.find_element(By.ID, "telao-radio-menu-button"))
+    wait(driver).until(EC.visibility_of_element_located((By.ID, "telao-radio-menu")))
+    assert len(driver.find_elements(By.CSS_SELECTOR, "#telao-radio-menu [data-radio-id]")) == 3
+    driver.execute_script(
+        """
+        const audio = document.getElementById('telao-radio-audio');
+        audio.play = () => {
+          Object.defineProperty(audio, 'paused', {value: false, configurable: true});
+          audio.dispatchEvent(new Event('play'));
+          return Promise.resolve();
+        };
+        audio.pause = () => {
+          Object.defineProperty(audio, 'paused', {value: true, configurable: true});
+          audio.dispatchEvent(new Event('pause'));
+        };
+        """
+    )
+    click(driver, driver.find_element(By.CSS_SELECTOR, '[data-radio-id="secret-agent"]'))
+    assert "secretagent-128-mp3" in driver.find_element(By.ID, "telao-radio-audio").get_attribute("src")
+    assert driver.find_element(By.ID, "telao-radio-toggle").get_attribute("title") == "Desligar rádio"
+    click(driver, driver.find_element(By.ID, "telao-radio-toggle"))
+    assert driver.find_element(By.ID, "telao-radio-toggle").get_attribute("title") == "Ligar rádio"
+
+    initial_zoom = float(driver.execute_script("return Number(document.documentElement.style.zoom || 1)"))
+    click(driver, driver.find_element(By.ID, "telao-zoom-in"))
+    wait(driver).until(
+        lambda browser: float(browser.execute_script("return Number(document.documentElement.style.zoom || 1)")) > initial_zoom
+    )
+    click(driver, driver.find_element(By.ID, "telao-zoom-out"))
+
     layout = driver.execute_script(
         """
         return {
-          pageOverflowX: document.documentElement.scrollWidth > window.innerWidth,
-          pageOverflowY: document.documentElement.scrollHeight > window.innerHeight,
+          pageOverflowX: document.documentElement.scrollWidth > window.innerWidth + 1,
+          pageOverflowY: document.documentElement.scrollHeight > window.innerHeight + 1,
           cards: [...document.querySelectorAll('.telao-card')].map(card => {
             const rect = card.getBoundingClientRect();
             const table = card.querySelector('.telao-table-wrap');
@@ -651,42 +734,76 @@ def validate_telao(driver, sponsors, latest_result):
     assert all(card["top"] >= 0 and card["bottom"] <= 1080 for card in layout["cards"])
     assert all(not card["tableOverflowX"] and not card["tableOverflowY"] for card in layout["cards"])
 
-    tables_started_at = time.monotonic()
-    first_sponsor_shape = wait(driver, 135).until(current_sponsor_shape)
+    first_sponsor_shape = wait(driver, table_seconds + 8).until(current_sponsor_shape)
     first_sponsor_elapsed = time.monotonic() - tables_started_at
-    assert 115 <= first_sponsor_elapsed <= 135
-    assert len(driver.find_elements(By.CSS_SELECTOR, ".sponsor-tv-card")) == 3
+    assert max(0, table_seconds - 2) <= first_sponsor_elapsed <= table_seconds + 8
+    assert first_sponsor_shape == "rect"
+    assert len(driver.find_elements(By.CSS_SELECTOR, ".sponsor-tv-card")) == len(sponsors)
     assert all(sponsor["name"] in driver.find_element(By.ID, "telao-grid").text for sponsor in sponsors)
-    expected_first_filename = "/rect-" if first_sponsor_shape == "rect" else "/square-"
     assert all(
-        expected_first_filename in image.get_attribute("src")
+        "/rect-" in image.get_attribute("src")
         for image in driver.find_elements(By.CSS_SELECTOR, ".sponsor-tv-card img")
     )
 
     sponsors_started_at = time.monotonic()
-    wait(driver, 35).until(EC.presence_of_element_located((By.CSS_SELECTOR, ".latest-result-card")))
+    wait(driver, sponsor_seconds + 8).until(EC.presence_of_element_located((By.CSS_SELECTOR, ".latest-result-card")))
     sponsor_elapsed = time.monotonic() - sponsors_started_at
-    assert 15 <= sponsor_elapsed <= 35
-    result_text = driver.find_element(By.CSS_SELECTOR, ".latest-result-card").text
-    assert latest_result["player1_name"] in result_text
-    assert latest_result["player2_name"] in result_text
-    assert str(latest_result["balls_p1"]) in result_text
-    assert str(latest_result["balls_p2"]) in result_text
+    assert max(0, sponsor_seconds - 2) <= sponsor_elapsed <= sponsor_seconds + 8
+    first_result_text = driver.find_element(By.CSS_SELECTOR, ".latest-result-card").text
+    assert matches[0]["player1_name"] in first_result_text
+    assert matches[0]["player2_name"] in first_result_text
 
-    result_started_at = time.monotonic()
-    wait(driver, 35).until(lambda browser: len(browser.find_elements(By.CSS_SELECTOR, ".telao-card")) == 3)
-    result_elapsed = time.monotonic() - result_started_at
-    assert 15 <= result_elapsed <= 35
-
-    second_tables_started_at = time.monotonic()
-    second_sponsor_shape = wait(driver, 135).until(current_sponsor_shape)
-    second_sponsor_elapsed = time.monotonic() - second_tables_started_at
-    assert 115 <= second_sponsor_elapsed <= 135
-    assert second_sponsor_shape != first_sponsor_shape
-    assert len(driver.find_elements(By.CSS_SELECTOR, ".sponsor-tv-card")) == 3
-    expected_second_filename = "/rect-" if second_sponsor_shape == "rect" else "/square-"
+    driver.set_window_size(1366, 480)
+    wait(driver).until(lambda browser: browser.execute_script("return window.innerHeight") <= 480)
+    responsive = driver.execute_script(
+        """
+        const card = document.querySelector('.latest-result-card').getBoundingClientRect();
+        const elements = [...document.querySelectorAll(
+          '.result-player img, .result-player h2, .result-player p, .player-score, .result-center'
+        )].map(element => {
+          const rect = element.getBoundingClientRect();
+          return {left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom};
+        });
+        return {
+          viewport: {width: window.innerWidth, height: window.innerHeight},
+          pageOverflowX: document.documentElement.scrollWidth > window.innerWidth + 1,
+          pageOverflowY: document.documentElement.scrollHeight > window.innerHeight + 1,
+          card: {left: card.left, top: card.top, right: card.right, bottom: card.bottom},
+          elements
+        };
+        """
+    )
+    assert not responsive["pageOverflowX"]
+    assert not responsive["pageOverflowY"]
+    assert responsive["card"]["bottom"] <= responsive["viewport"]["height"] + 1
     assert all(
-        expected_second_filename in image.get_attribute("src")
+        item["left"] >= responsive["card"]["left"] - 1
+        and item["right"] <= responsive["card"]["right"] + 1
+        and item["top"] >= responsive["card"]["top"] - 1
+        and item["bottom"] <= responsive["card"]["bottom"] + 1
+        for item in responsive["elements"]
+    )
+
+    wait(driver, match_seconds + 8).until(
+        lambda browser: browser.execute_script(
+            "return currentMode === 'matches' && currentMatchIndex >= 1;"
+        )
+    )
+    second_result_text = driver.find_element(By.CSS_SELECTOR, ".latest-result-card").text
+    assert matches[1]["player1_name"] in second_result_text
+    assert matches[1]["player2_name"] in second_result_text
+
+    driver.set_window_size(1920, 1080)
+    wait(driver, len(matches) * match_seconds + 10).until(
+        lambda browser: len(browser.find_elements(By.CSS_SELECTOR, ".telao-card")) == 3
+    )
+    second_tables_started_at = time.monotonic()
+    second_sponsor_shape = wait(driver, table_seconds + 8).until(current_sponsor_shape)
+    second_sponsor_elapsed = time.monotonic() - second_tables_started_at
+    assert max(0, table_seconds - 2) <= second_sponsor_elapsed <= table_seconds + 8
+    assert second_sponsor_shape == "square"
+    assert all(
+        "/square-" in image.get_attribute("src")
         for image in driver.find_elements(By.CSS_SELECTOR, ".sponsor-tv-card img")
     )
 
@@ -700,7 +817,8 @@ def test_complete_tournament_entirely_through_ui(driver, tmp_path):
     sponsors = create_sponsors_through_ui(driver, tmp_path)
     create_rounds_through_ui(driver, players_by_group)
     exhaust_until_partial_round_through_ui(driver)
-    expected, latest_result, state = save_mid_tournament_results_through_ui(driver)
+    expected, _latest_result, state = save_mid_tournament_results_through_ui(driver)
+    state = configure_telao_through_ui(driver)
     validate_standings(state, expected)
 
     public_players = {player["player_id"]: player for player in state["players"]}
@@ -710,4 +828,4 @@ def test_complete_tournament_entirely_through_ui(driver, tmp_path):
 
     validate_public_filters_share_and_pdf(driver, state)
     validate_player_profile(driver, profile_player, state)
-    validate_telao(driver, sponsors, latest_result)
+    validate_telao(driver, sponsors, state["tv_matches"], state["config"]["tv_config"])

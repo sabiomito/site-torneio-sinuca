@@ -108,14 +108,13 @@ Resources:
       FunctionCode: |
         function handler(event) {
           var request = event.request;
+          request.headers['x-site-host'] = { value: request.headers.host.value };
           if (request.uri === '/admin' || request.uri === '/admin/') {
             request.uri = '/admin.html';
           } else if (request.uri === '/player' || request.uri === '/player/') {
             request.uri = '/player.html';
           } else if (request.uri === '/telao' || request.uri === '/telao/' || request.uri === '/tv' || request.uri === '/tv/') {
             request.uri = '/telao.html';
-          } else if (request.uri.indexOf('/perfil/') === 0 || request.uri === '/perfil' || request.uri === '/perfil/') {
-            request.uri = '/perfil.html';
           } else if (request.uri === '/admin/jogador' || request.uri === '/admin/jogador/') {
             request.uri = '/admin-player.html';
           } else if (request.uri === '/admin/patrocinador' || request.uri === '/admin/patrocinador/') {
@@ -168,6 +167,27 @@ Resources:
             - EventType: viewer-request
               FunctionARN: !GetAtt UrlRewriteFunction.FunctionARN
         CacheBehaviors:
+          - PathPattern: perfil*
+            TargetOriginId: ApiFunctionUrlOrigin
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods:
+              - GET
+              - HEAD
+              - OPTIONS
+            CachedMethods:
+              - GET
+              - HEAD
+            Compress: true
+            ForwardedValues:
+              QueryString: false
+              Cookies:
+                Forward: none
+            MinTTL: 0
+            DefaultTTL: 0
+            MaxTTL: 0
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt UrlRewriteFunction.FunctionARN
           - PathPattern: api/*
             TargetOriginId: ApiFunctionUrlOrigin
             ViewerProtocolPolicy: redirect-to-https
