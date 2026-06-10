@@ -327,6 +327,14 @@ def media_key_from_url(url):
     return key if key.startswith("media/") else ""
 
 
+def delete_media_url(url):
+    key = media_key_from_url(url)
+    if key and MEDIA_BUCKET and _s3:
+        _s3.delete_object(Bucket=MEDIA_BUCKET, Key=key)
+        return True
+    return False
+
+
 def save_jpeg_media(data_url, key, previous_url=""):
     raw = parse_image_payload(data_url)
     if raw is None:
@@ -345,7 +353,7 @@ def save_jpeg_media(data_url, key, previous_url=""):
     )
     previous_key = media_key_from_url(previous_url)
     if previous_key and previous_key != versioned_key:
-        _s3.delete_object(Bucket=MEDIA_BUCKET, Key=previous_key)
+        delete_media_url(previous_url)
     return "/" + versioned_key
 
 
@@ -620,6 +628,9 @@ def delete_player(player_id):
     player_id = str(player_id or "")
     if not player_id:
         return
+    current = get_item("PLAYER", player_id)
+    if current:
+        delete_media_url(current.get("photo_url", ""))
     delete_item("PLAYER", player_id)
     for m in get_matches():
         if m.get("player1_id") == player_id or m.get("player2_id") == player_id:
@@ -1048,8 +1059,13 @@ def upsert_sponsor(data):
 
 def delete_sponsor(sponsor_id):
     sponsor_id = str(sponsor_id or "")
-    if sponsor_id:
-        delete_item("SPONSOR", sponsor_id)
+    if not sponsor_id:
+        return
+    current = get_item("SPONSOR", sponsor_id)
+    if current:
+        delete_media_url(current.get("square_image_url", ""))
+        delete_media_url(current.get("rect_image_url", ""))
+    delete_item("SPONSOR", sponsor_id)
 
 
 def latest_finished_match(matches):

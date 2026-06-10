@@ -68,3 +68,71 @@ def test_media_delete_never_leaves_media_prefix(monkeypatch):
     )
 
     assert fake_s3.deleted == []
+
+
+def test_delete_player_removes_photo_from_s3(monkeypatch):
+    fake_s3 = FakeS3()
+    deleted_items = []
+    monkeypatch.setattr(app, "_s3", fake_s3)
+    monkeypatch.setattr(app, "MEDIA_BUCKET", "test-media")
+    monkeypatch.setattr(
+        app,
+        "get_item",
+        lambda pk, sk: {
+            "player_id": sk,
+            "photo_url": "/media/players/player-1/photo-version.jpg",
+        },
+    )
+    monkeypatch.setattr(app, "delete_item", lambda pk, sk: deleted_items.append((pk, sk)))
+    monkeypatch.setattr(app, "get_matches", lambda: [])
+
+    app.delete_player("player-1")
+
+    assert fake_s3.deleted == ["media/players/player-1/photo-version.jpg"]
+    assert deleted_items == [("PLAYER", "player-1")]
+
+
+def test_delete_sponsor_removes_both_images_from_s3(monkeypatch):
+    fake_s3 = FakeS3()
+    deleted_items = []
+    monkeypatch.setattr(app, "_s3", fake_s3)
+    monkeypatch.setattr(app, "MEDIA_BUCKET", "test-media")
+    monkeypatch.setattr(
+        app,
+        "get_item",
+        lambda pk, sk: {
+            "sponsor_id": sk,
+            "square_image_url": "/media/sponsors/sponsor-1/square-version.jpg",
+            "rect_image_url": "/media/sponsors/sponsor-1/rect-version.jpg",
+        },
+    )
+    monkeypatch.setattr(app, "delete_item", lambda pk, sk: deleted_items.append((pk, sk)))
+
+    app.delete_sponsor("sponsor-1")
+
+    assert fake_s3.deleted == [
+        "media/sponsors/sponsor-1/square-version.jpg",
+        "media/sponsors/sponsor-1/rect-version.jpg",
+    ]
+    assert deleted_items == [("SPONSOR", "sponsor-1")]
+
+
+def test_entity_delete_ignores_non_media_urls(monkeypatch):
+    fake_s3 = FakeS3()
+    deleted_items = []
+    monkeypatch.setattr(app, "_s3", fake_s3)
+    monkeypatch.setattr(app, "MEDIA_BUCKET", "test-media")
+    monkeypatch.setattr(
+        app,
+        "get_item",
+        lambda pk, sk: {
+            "photo_url": "/img/entre-folhas-logo-transparent.png",
+        },
+    )
+    monkeypatch.setattr(app, "delete_item", lambda pk, sk: deleted_items.append((pk, sk)))
+    monkeypatch.setattr(app, "get_matches", lambda: [])
+
+    app.delete_player("player-with-default-image")
+
+    assert fake_s3.deleted == []
+    assert deleted_items == [("PLAYER", "player-with-default-image")]
