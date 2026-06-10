@@ -676,6 +676,7 @@ def validate_telao(driver, sponsors, matches, tv_config):
     tables_started_at = time.monotonic()
 
     countdown_text = driver.find_element(By.ID, "telao-countdown").text
+    assert countdown_text.startswith("Placar")
     first_countdown = int(re.search(r"(\d+)s", countdown_text).group(1))
     time.sleep(min(1.1, table_seconds / 2))
     second_countdown = int(re.search(r"(\d+)s", driver.find_element(By.ID, "telao-countdown").text).group(1))
@@ -738,6 +739,7 @@ def validate_telao(driver, sponsors, matches, tv_config):
     first_sponsor_elapsed = time.monotonic() - tables_started_at
     assert max(0, table_seconds - 2) <= first_sponsor_elapsed <= table_seconds + 8
     assert first_sponsor_shape == "rect"
+    assert driver.find_element(By.ID, "telao-countdown").text.startswith("Patrocinadores")
     assert len(driver.find_elements(By.CSS_SELECTOR, ".sponsor-tv-card")) == len(sponsors)
     assert all(sponsor["name"] in driver.find_element(By.ID, "telao-grid").text for sponsor in sponsors)
     assert all(
@@ -750,14 +752,63 @@ def validate_telao(driver, sponsors, matches, tv_config):
     sponsor_elapsed = time.monotonic() - sponsors_started_at
     assert max(0, sponsor_seconds - 2) <= sponsor_elapsed <= sponsor_seconds + 8
     first_result_text = driver.find_element(By.CSS_SELECTOR, ".latest-result-card").text
+    assert driver.find_element(By.ID, "telao-countdown").text.startswith("Confrontos 1 de ")
+    assert matches[0]["place_name"].lower() in first_result_text.lower()
     assert matches[0]["player1_name"] in first_result_text
     assert matches[0]["player2_name"] in first_result_text
+    visual_proportions = driver.execute_script(
+        """
+        const card = document.querySelector('.latest-result-card');
+        const images = [...card.querySelectorAll('.result-player img')];
+        const names = [...card.querySelectorAll('.result-player h2')];
+        const scores = [...card.querySelectorAll('.player-score')];
+        const versus = card.querySelector('.big-versus');
+        const center = card.querySelector('.result-center');
+        const versusRect = versus.getBoundingClientRect();
+        const centerRect = center.getBoundingClientRect();
+        const versusSize = parseFloat(getComputedStyle(versus).fontSize);
+        const scoreSize = parseFloat(getComputedStyle(scores[0]).fontSize);
+        return {
+          images: images.map((image, index) => {
+            const imageRect = image.getBoundingClientRect();
+            const nameRect = names[index].getBoundingClientRect();
+            return {
+              width: imageRect.width,
+              height: imageRect.height,
+              nameBelowPhoto: nameRect.top >= imageRect.bottom - 1
+            };
+          }),
+          scoreSize,
+          versusSize,
+          leftScoreRight: scores[0].getBoundingClientRect().right,
+          versusLeft: versusRect.left,
+          versusRight: versusRect.right,
+          rightScoreLeft: scores[1].getBoundingClientRect().left,
+          center: {left: centerRect.left, right: centerRect.right},
+          leftPhotoRight: images[0].getBoundingClientRect().right,
+          rightPhotoLeft: images[1].getBoundingClientRect().left
+        };
+        """
+    )
+    assert all(abs(image["width"] - image["height"]) <= 2 for image in visual_proportions["images"])
+    assert all(image["nameBelowPhoto"] for image in visual_proportions["images"])
+    assert all(image["width"] > visual_proportions["versusSize"] * 3 for image in visual_proportions["images"])
+    assert 1.15 <= visual_proportions["scoreSize"] / visual_proportions["versusSize"] <= 1.25
+    assert visual_proportions["leftScoreRight"] <= visual_proportions["versusLeft"] + 1
+    assert visual_proportions["rightScoreLeft"] >= visual_proportions["versusRight"] - 1
+    assert visual_proportions["leftPhotoRight"] <= visual_proportions["center"]["left"] + 1
+    assert visual_proportions["rightPhotoLeft"] >= visual_proportions["center"]["right"] - 1
 
     driver.set_window_size(1366, 480)
     wait(driver).until(lambda browser: browser.execute_script("return window.innerHeight") <= 480)
     responsive = driver.execute_script(
         """
         const card = document.querySelector('.latest-result-card').getBoundingClientRect();
+        const center = document.querySelector('.result-center').getBoundingClientRect();
+        const photos = [...document.querySelectorAll('.result-player img')].map(image => {
+          const rect = image.getBoundingClientRect();
+          return {left: rect.left, right: rect.right};
+        });
         const elements = [...document.querySelectorAll(
           '.result-player img, .result-player h2, .result-player p, .player-score, .result-center'
         )].map(element => {
@@ -769,6 +820,8 @@ def validate_telao(driver, sponsors, matches, tv_config):
           pageOverflowX: document.documentElement.scrollWidth > window.innerWidth + 1,
           pageOverflowY: document.documentElement.scrollHeight > window.innerHeight + 1,
           card: {left: card.left, top: card.top, right: card.right, bottom: card.bottom},
+          center: {left: center.left, right: center.right},
+          photos,
           elements
         };
         """
@@ -776,6 +829,8 @@ def validate_telao(driver, sponsors, matches, tv_config):
     assert not responsive["pageOverflowX"]
     assert not responsive["pageOverflowY"]
     assert responsive["card"]["bottom"] <= responsive["viewport"]["height"] + 1
+    assert responsive["photos"][0]["right"] <= responsive["center"]["left"] + 1
+    assert responsive["photos"][1]["left"] >= responsive["center"]["right"] - 1
     assert all(
         item["left"] >= responsive["card"]["left"] - 1
         and item["right"] <= responsive["card"]["right"] + 1
@@ -790,6 +845,7 @@ def validate_telao(driver, sponsors, matches, tv_config):
         )
     )
     second_result_text = driver.find_element(By.CSS_SELECTOR, ".latest-result-card").text
+    assert driver.find_element(By.ID, "telao-countdown").text.startswith("Confrontos 2 de ")
     assert matches[1]["player1_name"] in second_result_text
     assert matches[1]["player2_name"] in second_result_text
 
@@ -806,6 +862,18 @@ def validate_telao(driver, sponsors, matches, tv_config):
         "/square-" in image.get_attribute("src")
         for image in driver.find_elements(By.CSS_SELECTOR, ".sponsor-tv-card img")
     )
+
+    pending = driver.execute_script(
+        """
+        const match = (telaoState.matches || []).find(item => !item.is_finished);
+        if (!match) return null;
+        renderMatch(match);
+        return match;
+        """
+    )
+    assert pending is not None
+    assert driver.find_element(By.CSS_SELECTOR, ".result-pending-label").text.lower() == "pendente"
+    assert pending["place_name"].lower() in driver.find_element(By.CSS_SELECTOR, ".result-kicker").text.lower()
 
 
 @pytest.mark.full

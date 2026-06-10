@@ -172,30 +172,35 @@ function renderMatch(match) {
   const player2 = playerByIdTv(match.player2_id) || {name: match.player2_name};
   const score1 = match.is_finished ? Number(match.balls_p1 || 0) : '–';
   const score2 = match.is_finished ? Number(match.balls_p2 || 0) : '–';
-  const position = Math.min(currentMatchIndex + 1, cycleMatches().length);
   grid.innerHTML = `
     <section class="latest-result-card">
       <div class="result-player">
         <div class="result-player-photo">
           <img src="${escapeHtml(player1.photo_url || '/img/entre-folhas-logo-transparent.png')}" alt="${escapeHtml(player1.name)}">
-          <div class="player-score ${match.winner_id === match.player1_id ? 'winner-score' : ''}">${score1}</div>
         </div>
-        <h2>${escapeHtml(player1.name || match.player1_name)}</h2>
-        <p>${escapeHtml(player1.short_message || '')}</p>
+        <div class="result-player-copy">
+          <h2>${escapeHtml(player1.name || match.player1_name)}</h2>
+          <p>${escapeHtml(player1.short_message || '')}</p>
+        </div>
       </div>
       <div class="result-center">
-        <div class="result-kicker">${match.is_finished ? 'Partida finalizada' : 'Partida pendente'}</div>
-        <div class="big-versus">X</div>
-        <div class="result-meta">${fmtDate(match.date)} · ${escapeHtml(match.time || '')} · ${escapeHtml(match.place_name || '')}</div>
-        <div class="result-position">${position} de ${cycleMatches().length}</div>
+        <div class="result-kicker">${escapeHtml(match.place_name || 'Local não informado')}</div>
+        <div class="result-scoreline">
+          <span class="player-score ${match.winner_id === match.player1_id ? 'winner-score' : ''}">${score1}</span>
+          <span class="big-versus">X</span>
+          <span class="player-score ${match.winner_id === match.player2_id ? 'winner-score' : ''}">${score2}</span>
+        </div>
+        <div class="result-meta">${fmtDate(match.date)} · ${escapeHtml(match.time || '')}</div>
+        ${match.is_finished ? '' : '<div class="result-pending-label">Pendente</div>'}
       </div>
       <div class="result-player">
         <div class="result-player-photo">
           <img src="${escapeHtml(player2.photo_url || '/img/entre-folhas-logo-transparent.png')}" alt="${escapeHtml(player2.name)}">
-          <div class="player-score ${match.winner_id === match.player2_id ? 'winner-score' : ''}">${score2}</div>
         </div>
-        <h2>${escapeHtml(player2.name || match.player2_name)}</h2>
-        <p>${escapeHtml(player2.short_message || '')}</p>
+        <div class="result-player-copy">
+          <h2>${escapeHtml(player2.name || match.player2_name)}</h2>
+          <p>${escapeHtml(player2.short_message || '')}</p>
+        </div>
       </div>
     </section>
   `;
@@ -220,12 +225,20 @@ function renderCurrentMode() {
 
 function updateCountdown() {
   const element = document.getElementById('telao-countdown');
+  let label = 'Placar';
+  if (currentMode === 'sponsors') {
+    label = 'Patrocinadores';
+  } else if (currentMode === 'matches') {
+    const total = cycleMatches().length;
+    const current = total ? Math.min(currentMatchIndex + 1, total) : 0;
+    label = `Confrontos ${current} de ${total}`;
+  }
   if (!phaseEndsAt) {
-    element.textContent = 'Preparando próxima visualização';
+    element.textContent = `${label} — Preparando próxima visualização`;
     return;
   }
   const seconds = Math.max(0, Math.ceil((phaseEndsAt - Date.now()) / 1000));
-  element.textContent = `Próxima visualização em ${seconds}s`;
+  element.textContent = `${label} — Próxima visualização em ${seconds}s`;
 }
 
 function schedulePhase(seconds, callback) {
