@@ -21,10 +21,16 @@ SECRET_KEY = os.environ.get("SECRET_KEY", "troque-esta-chave")
 SESSION_SECONDS = int(os.environ.get("SESSION_SECONDS", "43200"))
 DATABASE_RESET_VERSION = os.environ.get("DATABASE_RESET_VERSION", "")
 MEDIA_BUCKET = os.environ.get("MEDIA_BUCKET", "")
+AWS_REGION = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or "sa-east-1"
+DYNAMODB_ENDPOINT_URL = os.environ.get("DYNAMODB_ENDPOINT_URL", "")
+S3_ENDPOINT_URL = os.environ.get("S3_ENDPOINT_URL", "")
 
-_dynamodb = boto3.resource("dynamodb")
+_session = boto3.session.Session(region_name=AWS_REGION)
+_dynamodb_options = {"endpoint_url": DYNAMODB_ENDPOINT_URL} if DYNAMODB_ENDPOINT_URL else {}
+_s3_options = {"endpoint_url": S3_ENDPOINT_URL} if S3_ENDPOINT_URL else {}
+_dynamodb = _session.resource("dynamodb", **_dynamodb_options)
 _table = _dynamodb.Table(TABLE_NAME) if TABLE_NAME else None
-_s3 = boto3.client("s3") if MEDIA_BUCKET else None
+_s3 = _session.client("s3", **_s3_options) if MEDIA_BUCKET else None
 _reset_checked = False
 
 
@@ -316,20 +322,31 @@ def parse_image_payload(data_url):
     return raw
 
 
-def save_jpeg_media(data_url, key):
+def media_key_from_url(url):
+    key = unquote(str(url or "")).split("?", 1)[0].lstrip("/")
+    return key if key.startswith("media/") else ""
+
+
+def save_jpeg_media(data_url, key, previous_url=""):
     raw = parse_image_payload(data_url)
     if raw is None:
         return ""
     if not MEDIA_BUCKET or not _s3:
         raise ValueError("Bucket de mídia não configurado no servidor.")
+    stem, extension = os.path.splitext(key)
+    content_version = hashlib.sha256(raw).hexdigest()[:16]
+    versioned_key = f"{stem}-{content_version}{extension or '.jpg'}"
     _s3.put_object(
         Bucket=MEDIA_BUCKET,
-        Key=key,
+        Key=versioned_key,
         Body=raw,
         ContentType="image/jpeg",
-        CacheControl="public, max-age=31536000",
+        CacheControl="public, max-age=31536000, immutable",
     )
-    return "/" + key
+    previous_key = media_key_from_url(previous_url)
+    if previous_key and previous_key != versioned_key:
+        _s3.delete_object(Bucket=MEDIA_BUCKET, Key=previous_key)
+    return "/" + versioned_key
 
 
 def build_pair_key(division, chave, p1_id, p2_id):
@@ -577,7 +594,11 @@ def upsert_player(data):
     }
     photo_data_url = data.get("photo_data_url")
     if photo_data_url:
-        item["photo_url"] = save_jpeg_media(photo_data_url, f"media/players/{player_id}/photo.jpg")
+        item["photo_url"] = save_jpeg_media(
+            photo_data_url,
+            f"media/players/{player_id}/photo.jpg",
+            current.get("photo_url", ""),
+        )
     put_item(item)
 
     # Mantém nomes já exibidos nas partidas novas/pendentes quando o nome muda.
@@ -1010,9 +1031,17 @@ def upsert_sponsor(data):
         "updated_at": now_iso(),
     }
     if data.get("square_image_data_url"):
-        item["square_image_url"] = save_jpeg_media(data.get("square_image_data_url"), f"media/sponsors/{sponsor_id}/square.jpg")
+        item["square_image_url"] = save_jpeg_media(
+            data.get("square_image_data_url"),
+            f"media/sponsors/{sponsor_id}/square.jpg",
+            current.get("square_image_url", ""),
+        )
     if data.get("rect_image_data_url"):
-        item["rect_image_url"] = save_jpeg_media(data.get("rect_image_data_url"), f"media/sponsors/{sponsor_id}/rect.jpg")
+        item["rect_image_url"] = save_jpeg_media(
+            data.get("rect_image_data_url"),
+            f"media/sponsors/{sponsor_id}/rect.jpg",
+            current.get("rect_image_url", ""),
+        )
     put_item(item)
     return item
 

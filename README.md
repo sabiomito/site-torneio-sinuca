@@ -146,3 +146,95 @@ SECRET_KEY
 - Adicionado cadastro de patrocinadores, com imagem quadrada 400x400 e retangular 1200x400.
 - O deploy preserva a pasta `media/` no S3 para não apagar fotos enviadas pelo painel.
 - O modo telão agora alterna entre tabelas, patrocinadores e último resultado salvo.
+
+## Desenvolvimento local seguro
+
+O ambiente local usa LocalStack para simular DynamoDB e S3, sem acessar os dados da AWS real.
+O frontend continua apontando para `/api`, mas agora pode ser servido por um servidor local que simula o CloudFront e chama o `lambda_handler` diretamente.
+
+### Requisitos
+
+- Docker Desktop com `docker compose`.
+- Python 3.12 ou superior.
+- Google Chrome instalado para os testes E2E.
+
+### Primeira configuracao
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements-dev.txt
+.\scripts\local\init.ps1
+```
+
+Depois inicie o site local:
+
+```powershell
+.\scripts\local\dev.ps1
+```
+
+Acesse:
+
+```text
+http://localhost:8000
+```
+
+Admin local:
+
+```text
+Senha: 1234
+```
+
+### Resetar somente o ambiente local
+
+```powershell
+.\scripts\local\reset.ps1
+```
+
+O script exige a palavra `LOCAL` e tambem valida que os endpoints apontam para `localhost` e que os nomes dos recursos contem `local`.
+
+### Testes E2E com Selenium
+
+Com o servidor local rodando em outro terminal:
+
+```powershell
+.\scripts\local\test_e2e.ps1
+```
+
+Para ver o Chrome abrindo:
+
+```powershell
+.\scripts\local\test_e2e.ps1 -Headed
+```
+
+Os testes abortam se `APP_BASE_URL` nao apontar para `localhost`.
+
+### Cenario E2E completo
+
+O cenario completo usa somente cliques, formularios, uploads e confirmacoes da interface.
+Ele cria 48 jogadores, atualiza fotos e frases, cadastra patrocinadores, cria rodadas
+automaticas e manuais, testa conflitos, resultados, filtros, compartilhamento, PDF,
+perfis e todas as etapas do telao.
+
+```powershell
+.\scripts\local\test_e2e.ps1 -Full
+```
+
+Para acompanhar no navegador:
+
+```powershell
+.\scripts\local\test_e2e.ps1 -Full -Headed
+```
+
+Esse teste limpa somente o banco local e pode levar cerca de 23 minutos.
+Nos minutos finais ele acompanha o ciclo real do telao: 120 segundos de tabelas,
+20 segundos de patrocinadores, 20 segundos do ultimo resultado e uma segunda
+passagem de 120 segundos para validar a alternancia entre imagens retangulares
+e quadradas dos patrocinadores.
+O comando sem `-Full` continua executando apenas o smoke test rapido.
+
+Para repetir apenas o ciclo real do telao usando o campeonato local ja criado:
+
+```powershell
+.\scripts\local\test_e2e.ps1 -TelaoOnly -Headed
+```

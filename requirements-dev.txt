@@ -1,0 +1,4 @@
+boto3>=1.34,<2
+Pillow>=10,<12
+pytest>=8,<9
+selenium>=4.20,<5

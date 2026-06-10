@@ -1,0 +1,16 @@
+services:
+  localstack:
+    image: localstack/localstack:3
+    container_name: torneio-sinuca-localstack
+    ports:
+      - "4566:4566"
+    environment:
+      SERVICES: dynamodb,s3
+      DEFAULT_REGION: sa-east-1
+      DEBUG: "0"
+      PERSISTENCE: "1"
+    volumes:
+      - localstack-data:/var/lib/localstack
+
+volumes:
+  localstack-data:
