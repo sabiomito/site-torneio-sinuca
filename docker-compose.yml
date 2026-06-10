@@ -9,6 +9,8 @@ services:
       DEFAULT_REGION: sa-east-1
       DEBUG: "0"
       PERSISTENCE: "1"
+      SNAPSHOT_SAVE_STRATEGY: ON_REQUEST
+      SNAPSHOT_LOAD_STRATEGY: ON_STARTUP
     volumes:
       - localstack-data:/var/lib/localstack
 
