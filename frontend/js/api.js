@@ -91,7 +91,8 @@ function matchResultText(match) {
   if (!match.is_finished) return '<span class="badge pending">Pendente</span>';
   const p1Winner = match.winner_id === match.player1_id;
   const p2Winner = match.winner_id === match.player2_id;
-  return `<span class="score"><span class="${p1Winner ? 'winner' : ''}">${playerLinkHtml(match.player1_id, match.player1_name, 'player-link compact-link')} ${match.balls_p1 || 0}</span> x <span class="${p2Winner ? 'winner' : ''}">${match.balls_p2 || 0} ${playerLinkHtml(match.player2_id, match.player2_name, 'player-link compact-link')}</span></span>`;
+  const note = match.double_loss ? '<span class="badge loss double-loss-note">Derrota para ambos</span>' : '';
+  return `<span class="score"><span class="${p1Winner ? 'winner' : ''}">${playerLinkHtml(match.player1_id, match.player1_name, 'player-link compact-link')} ${match.balls_p1 || 0}</span> x <span class="${p2Winner ? 'winner' : ''}">${match.balls_p2 || 0} ${playerLinkHtml(match.player2_id, match.player2_name, 'player-link compact-link')}</span></span>${note}`;
 }
 
 function getFilteredMatches(matches, filters) {
@@ -170,12 +171,14 @@ function matchPlainResult(match) {
   if (!match.is_finished) return '';
   const p1 = `${match.player1_name || ''} ${match.balls_p1 || 0}`;
   const p2 = `${match.balls_p2 || 0} ${match.player2_name || ''}`;
-  return `${p1} x ${p2}`;
+  return `${p1} x ${p2}${match.double_loss ? ' · derrota para ambos' : ''}`;
 }
 
 
 function printableMatchRow(match) {
-  const result = match.is_finished ? `${match.balls_p1 || 0} x ${match.balls_p2 || 0}` : '';
+  const result = match.is_finished
+    ? `${match.balls_p1 || 0} x ${match.balls_p2 || 0}${match.double_loss ? ' (derrota para ambos)' : ''}`
+    : '';
   const blank = '<span class="blank-score"></span> x <span class="blank-score"></span>';
   const roundText = `${divisionName(match.division)}${match.chave ? ` / Chave ${escapeHtml(normalizeChaveLabel(match.chave))}` : ''}${match.round_number ? ` / Rodada ${escapeHtml(match.round_number)}` : ''}`;
   return `<tr>
@@ -218,7 +221,7 @@ function openMatchesPrintWindow(matches, title = 'Lista de jogos', subtitle = ''
       </table>
       <footer>
         <div>2° campeonato municipal de sinuca · Lista de jogos · Página ${pageIdx + 1}/${Math.max(1, pages.length)}</div>
-        <div>Vitória = 3 pontos · vencedor recebe 7 bolas</div>
+        <div>Vitória = 3 pontos · vencedor recebe 7 bolas · derrota para ambos = 0 x 0 sem pontos ou saldo</div>
       </footer>
     </section>
   `).join('');

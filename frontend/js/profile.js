@@ -34,6 +34,9 @@ function matchResultForPlayer(match, player) {
   if (!match.is_finished) return '<span class="badge pending">Pendente</span>';
   const myBalls = match.player1_id === player.player_id ? match.balls_p1 : match.balls_p2;
   const otherBalls = match.player1_id === player.player_id ? match.balls_p2 : match.balls_p1;
+  if (match.double_loss) {
+    return `<span class="badge loss">Derrota · ${myBalls || 0} x ${otherBalls || 0}</span>`;
+  }
   const won = match.winner_id === player.player_id;
   return `<span class="badge ${won ? 'win' : 'loss'}">${won ? 'Vitória' : 'Derrota'} · ${myBalls || 0} x ${otherBalls || 0}</span>`;
 }

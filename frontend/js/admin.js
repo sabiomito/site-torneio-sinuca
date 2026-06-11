@@ -528,22 +528,24 @@ function renderAdminMatches() {
   container.innerHTML = matches.map(match => {
     const p1Win = match.winner_id === match.player1_id;
     const p2Win = match.winner_id === match.player2_id;
+    const doubleLoss = Boolean(match.double_loss);
     return `<form class="result-form ${match.is_finished ? 'finished' : ''}" data-match-id="${escapeHtml(match.match_id)}">
-      <div class="match-meta">${fmtDate(match.date)} · ${escapeHtml(match.time || '--:--')} até ${escapeHtml(match.end_time || '--:--')} · ${escapeHtml(match.place_name || 'Sem local')} · ${divisionName(match.division)} · Chave ${escapeHtml(normalizeChave(match.chave))} · Rodada ${escapeHtml(match.round_number || '-')} ${match.round_deleted ? '· rodada excluída' : ''} ${match.is_finished ? '· finalizada' : ''}</div>
+      <div class="match-meta">${fmtDate(match.date)} · ${escapeHtml(match.time || '--:--')} até ${escapeHtml(match.end_time || '--:--')} · ${escapeHtml(match.place_name || 'Sem local')} · ${divisionName(match.division)} · Chave ${escapeHtml(normalizeChave(match.chave))} · Rodada ${escapeHtml(match.round_number || '-')} ${match.round_deleted ? '· rodada excluída' : ''} ${match.is_finished ? '· finalizada' : ''} ${doubleLoss ? '· derrota para ambos' : ''}</div>
       <strong>${escapeHtml(match.player1_name)} x ${escapeHtml(match.player2_name)}</strong>
       <div class="result-grid">
-        <label>Vencedor
+        <label>Resultado
           <select name="winner_id" required>
             <option value="">Selecione</option>
             <option value="${escapeHtml(match.player1_id)}" ${p1Win ? 'selected' : ''}>${escapeHtml(match.player1_name)}</option>
             <option value="${escapeHtml(match.player2_id)}" ${p2Win ? 'selected' : ''}>${escapeHtml(match.player2_name)}</option>
+            <option value="__double_loss__" ${doubleLoss ? 'selected' : ''}>Derrota para ambos (0 x 0)</option>
           </select>
         </label>
         <label>Bolas ${escapeHtml(match.player1_name)}
-          <input type="number" name="balls_p1" min="0" max="7" value="${match.balls_p1 || 0}">
+          <input type="number" name="balls_p1" min="0" max="7" value="${match.balls_p1 || 0}" ${doubleLoss ? 'disabled' : ''}>
         </label>
         <label>Bolas ${escapeHtml(match.player2_name)}
-          <input type="number" name="balls_p2" min="0" max="7" value="${match.balls_p2 || 0}">
+          <input type="number" name="balls_p2" min="0" max="7" value="${match.balls_p2 || 0}" ${doubleLoss ? 'disabled' : ''}>
         </label>
         <button type="submit">Salvar resultado</button>
         <button class="secondary" type="button" data-clear-result>Limpar</button>
@@ -557,8 +559,17 @@ function renderAdminMatches() {
     const p2 = form.querySelector('[name="balls_p2"]');
     const match = matches.find(m => m.match_id === form.dataset.matchId);
     winner.addEventListener('change', () => {
-      if (winner.value === match.player1_id) p1.value = 7;
-      if (winner.value === match.player2_id) p2.value = 7;
+      const doubleLoss = winner.value === '__double_loss__';
+      p1.disabled = doubleLoss;
+      p2.disabled = doubleLoss;
+      if (doubleLoss) {
+        p1.value = 0;
+        p2.value = 0;
+      } else if (winner.value === match.player1_id) {
+        p1.value = 7;
+      } else if (winner.value === match.player2_id) {
+        p2.value = 7;
+      }
     });
     form.addEventListener('submit', async (ev) => {
       ev.preventDefault();
@@ -566,7 +577,8 @@ function renderAdminMatches() {
         method: 'POST',
         body: JSON.stringify({
           match_id: form.dataset.matchId,
-          winner_id: winner.value,
+          winner_id: winner.value === '__double_loss__' ? '' : winner.value,
+          double_loss: winner.value === '__double_loss__',
           balls_p1: Number(p1.value || 0),
           balls_p2: Number(p2.value || 0),
         })

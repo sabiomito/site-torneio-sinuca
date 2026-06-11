@@ -99,20 +99,47 @@ def test_admin_flow_creates_round_and_public_score(driver):
     open_section(driver, "matches")
     form = wait(driver).until(EC.presence_of_element_located((By.CSS_SELECTOR, ".result-form")))
     match_id = form.get_attribute("data-match-id")
-    Select(form.find_element(By.NAME, "winner_id")).select_by_index(1)
+    Select(form.find_element(By.NAME, "winner_id")).select_by_value("__double_loss__")
+    assert form.find_element(By.NAME, "balls_p1").get_attribute("disabled")
+    assert form.find_element(By.NAME, "balls_p2").get_attribute("disabled")
     form.find_element(By.CSS_SELECTOR, 'button[type="submit"]').click()
-    wait(driver).until(
+    finished_state = wait(driver).until(
         lambda browser: (
             (state := admin_state(browser))
-            and any(
-                match["match_id"] == match_id and match.get("is_finished")
-                for match in state["matches"]
+            and next(
+                (
+                    match
+                    for match in state["matches"]
+                    if match["match_id"] == match_id
+                    and match.get("is_finished")
+                    and match.get("double_loss")
+                    and match.get("balls_p1") == 0
+                    and match.get("balls_p2") == 0
+                ),
+                None,
             )
+            and state
         )
+    )
+    rows = {
+        row["player_id"]: row
+        for division in finished_state["standings"].values()
+        for chave in division.values()
+        for row in chave
+    }
+    assert all(
+        rows[player["player_id"]]["played"] == 1
+        and rows[player["player_id"]]["losses"] == 1
+        and rows[player["player_id"]]["points"] == 0
+        and rows[player["player_id"]]["balls_balance"] == 0
+        for player in finished_state["players"]
     )
 
     Select(driver.find_element(By.ID, "admin-filter-status")).select_by_value("finished")
     wait(driver).until(lambda browser: len(browser.find_elements(By.CSS_SELECTOR, "#admin-matches .result-form")) == 1)
+    finished_form = driver.find_element(By.CSS_SELECTOR, "#admin-matches .result-form")
+    assert Select(finished_form.find_element(By.NAME, "winner_id")).first_selected_option.get_attribute("value") == "__double_loss__"
+    assert "derrota para ambos" in finished_form.text.lower()
     Select(driver.find_element(By.ID, "admin-filter-status")).select_by_value("pending")
     wait(driver).until(lambda browser: len(browser.find_elements(By.CSS_SELECTOR, "#admin-matches .result-form")) == 0)
 
@@ -122,6 +149,17 @@ def test_admin_flow_creates_round_and_public_score(driver):
     assert not driver.find_elements(By.CSS_SELECTOR, "#matches .match-row")
     Select(driver.find_element(By.ID, "filter-status")).select_by_value("finished")
     wait(driver).until(lambda browser: len(browser.find_elements(By.CSS_SELECTOR, "#matches .match-row")) == 1)
+    assert "0 x 0" in driver.find_element(By.ID, "matches").text
+    assert "Derrota para ambos" in driver.find_element(By.ID, "matches").text
     standings_text = driver.find_element(By.ID, "standings").text
     assert "Teste Beta" in standings_text
-    assert "3" in standings_text
+
+    player = next(item for item in finished_state["players"] if item["name"] == "Teste Alpha")
+    driver.get(f"{BASE_URL}{player['profile_url']}")
+    wait(driver).until(EC.text_to_be_present_in_element((By.ID, "profile-root"), "Teste Alpha"))
+    assert "Derrota · 0 x 0" in driver.find_element(By.ID, "profile-root").text
+
+    driver.get(f"{BASE_URL}/player?id={player['player_id']}")
+    wait(driver).until(EC.text_to_be_present_in_element((By.ID, "player-matches"), "Teste Beta"))
+    assert "0 x 0" in driver.find_element(By.ID, "player-matches").text
+    assert "Derrota para ambos" in driver.find_element(By.ID, "player-matches").text

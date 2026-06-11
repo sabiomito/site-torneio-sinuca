@@ -487,6 +487,8 @@ def get_rounds():
 
 def get_matches():
     matches = scan_type("MATCH")
+    for match in matches:
+        match["double_loss"] = bool(match.get("double_loss", False))
     return sorted(matches, key=lambda m: (m.get("date") or "9999-99-99", m.get("time") or "99:99", m.get("place_name", ""), m.get("round_number", 999), m.get("chave", "A")))
 
 
@@ -547,7 +549,10 @@ def tv_cycle_matches(matches, tv_config):
 
 
 def get_results():
-    return scan_type("RESULT")
+    results = scan_type("RESULT")
+    for result in results:
+        result["double_loss"] = bool(result.get("double_loss", False))
+    return results
 
 
 def derive_dates(matches, rounds):
@@ -790,6 +795,7 @@ def build_match_item(round_item, p1, p2, order_index):
         "balls_p1": 0,
         "balls_p2": 0,
         "is_finished": False,
+        "double_loss": False,
         "created_at": now_iso(),
     }
     if previous_result:
@@ -797,6 +803,7 @@ def build_match_item(round_item, p1, p2, order_index):
         item["balls_p1"] = previous_result.get("balls_p1", 0)
         item["balls_p2"] = previous_result.get("balls_p2", 0)
         item["is_finished"] = True
+        item["double_loss"] = bool(previous_result.get("double_loss"))
     return item
 
 
@@ -1025,25 +1032,28 @@ def set_match_result(data):
         match["balls_p1"] = 0
         match["balls_p2"] = 0
         match["is_finished"] = False
+        match["double_loss"] = False
         match["updated_at"] = now_iso()
         match["result_saved_at"] = ""
         put_item(match)
         delete_item("RESULT", pair_key)
         return match
-    winner_id = str(data.get("winner_id", ""))
-    if winner_id not in [match.get("player1_id"), match.get("player2_id")]:
-        raise ValueError("Selecione o vencedor da partida.")
-    balls_p1 = normalize_int(data.get("balls_p1", 0), 0, 0, 7)
-    balls_p2 = normalize_int(data.get("balls_p2", 0), 0, 0, 7)
-    if winner_id == match.get("player1_id"):
+    double_loss = bool(data.get("double_loss"))
+    winner_id = "" if double_loss else str(data.get("winner_id", ""))
+    if not double_loss and winner_id not in [match.get("player1_id"), match.get("player2_id")]:
+        raise ValueError("Selecione o vencedor ou marque derrota para ambos.")
+    balls_p1 = 0 if double_loss else normalize_int(data.get("balls_p1", 0), 0, 0, 7)
+    balls_p2 = 0 if double_loss else normalize_int(data.get("balls_p2", 0), 0, 0, 7)
+    if not double_loss and winner_id == match.get("player1_id"):
         balls_p1 = 7
-    if winner_id == match.get("player2_id"):
+    if not double_loss and winner_id == match.get("player2_id"):
         balls_p2 = 7
     saved_at = now_iso()
     match["winner_id"] = winner_id
     match["balls_p1"] = balls_p1
     match["balls_p2"] = balls_p2
     match["is_finished"] = True
+    match["double_loss"] = double_loss
     match["result_saved_at"] = saved_at
     match["updated_at"] = saved_at
     put_item(match)
@@ -1062,6 +1072,7 @@ def set_match_result(data):
         "balls_p1": balls_p1,
         "balls_p2": balls_p2,
         "is_finished": True,
+        "double_loss": double_loss,
         "created_at": saved_at,
         "result_saved_at": saved_at,
     })
@@ -1112,7 +1123,10 @@ def calculate_standings(players, matches, results, config):
         p1["balls_against"] += balls_p2
         p2["balls_for"] += balls_p2
         p2["balls_against"] += balls_p1
-        if item.get("winner_id") == item.get("player1_id"):
+        if item.get("double_loss"):
+            p1["losses"] += 1
+            p2["losses"] += 1
+        elif item.get("winner_id") == item.get("player1_id"):
             p1["wins"] += 1
             p1["points"] += 3
             p2["losses"] += 1

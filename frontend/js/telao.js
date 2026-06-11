@@ -191,7 +191,9 @@ function renderMatch(match) {
           <span class="player-score ${match.winner_id === match.player2_id ? 'winner-score' : ''}">${score2}</span>
         </div>
         <div class="result-meta">${fmtDate(match.date)} · ${escapeHtml(match.time || '')}</div>
-        ${match.is_finished ? '' : '<div class="result-pending-label">Pendente</div>'}
+        ${match.double_loss
+          ? '<div class="result-double-loss-label">Derrota para ambos</div>'
+          : match.is_finished ? '' : '<div class="result-pending-label">Pendente</div>'}
       </div>
       <div class="result-player">
         <div class="result-player-photo">

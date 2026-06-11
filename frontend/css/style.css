@@ -190,6 +190,7 @@ tr.relegation td:first-child, .rank-relegation td:first-child { border-left: 4px
 .match-row.finished, .match-card.finished { border-color: rgba(40, 209, 124, .28); }
 .match-main { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .match-status { color: var(--muted); text-align: right; }
+.match-status .double-loss-note { margin-left: 8px; }
 .match-meta { color: var(--muted); font-size: .95rem; }
 
 .pill, .badge, .legend-chip, .date-chip {
@@ -898,6 +899,16 @@ tr.relegation td:first-child, .rank-relegation td:first-child { border-left: 4px
   border-radius: 5px;
   color: var(--warning);
   background: rgba(255,209,102,.1);
+  font-size: min(2.5vh, 18px);
+  font-weight: 900;
+  text-transform: uppercase;
+}
+.result-double-loss-label {
+  padding: 5px 10px;
+  border: 1px solid rgba(255,100,100,.45);
+  border-radius: 5px;
+  color: var(--danger);
+  background: rgba(255,100,100,.1);
   font-size: min(2.5vh, 18px);
   font-weight: 900;
   text-transform: uppercase;

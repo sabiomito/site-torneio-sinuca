@@ -875,6 +875,22 @@ def validate_telao(driver, sponsors, matches, tv_config):
     assert driver.find_element(By.CSS_SELECTOR, ".result-pending-label").text.lower() == "pendente"
     assert pending["place_name"].lower() in driver.find_element(By.CSS_SELECTOR, ".result-kicker").text.lower()
 
+    driver.execute_script(
+        """
+        const match = {
+          ...telaoState.tv_matches[0],
+          is_finished: true,
+          double_loss: true,
+          winner_id: '',
+          balls_p1: 0,
+          balls_p2: 0
+        };
+        renderMatch(match);
+        """
+    )
+    assert driver.find_element(By.CSS_SELECTOR, ".result-double-loss-label").text.lower() == "derrota para ambos"
+    assert [item.text for item in driver.find_elements(By.CSS_SELECTOR, ".result-scoreline .player-score")] == ["0", "0"]
+
 
 @pytest.mark.full
 def test_complete_tournament_entirely_through_ui(driver, tmp_path):
