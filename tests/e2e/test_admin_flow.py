@@ -163,3 +163,28 @@ def test_admin_flow_creates_round_and_public_score(driver):
     wait(driver).until(EC.text_to_be_present_in_element((By.ID, "player-matches"), "Teste Beta"))
     assert "0 x 0" in driver.find_element(By.ID, "player-matches").text
     assert "Derrota para ambos" in driver.find_element(By.ID, "player-matches").text
+
+    driver.get(f"{BASE_URL}/telao")
+    wait(driver).until(EC.element_to_be_clickable((By.ID, "telao-radio-menu-button"))).click()
+    wait(driver).until(EC.visibility_of_element_located((By.ID, "telao-radio-menu")))
+    assert len(driver.find_elements(By.CSS_SELECTOR, "#telao-radio-menu [data-radio-id]")) == 14
+    radio_menu_text = driver.find_element(By.ID, "telao-radio-menu").text.lower()
+    assert "sertanejo clássico" in radio_menu_text
+    assert "forró" in radio_menu_text
+    assert "românticas e flashback" in radio_menu_text
+    driver.execute_script(
+        """
+        const audio = document.getElementById('telao-radio-audio');
+        audio.play = () => {
+          Object.defineProperty(audio, 'paused', {value: false, configurable: true});
+          audio.dispatchEvent(new Event('play'));
+          return Promise.resolve();
+        };
+        """
+    )
+    driver.find_element(By.CSS_SELECTOR, '[data-radio-id="so-forro-antigas"]').click()
+    assert "7132/stremig" in driver.find_element(By.ID, "telao-radio-audio").get_attribute("src")
+    assert (
+        driver.find_element(By.ID, "telao-radio-menu-button").get_attribute("title")
+        == "Selecionar rádio · Só Forró das Antigas"
+    )

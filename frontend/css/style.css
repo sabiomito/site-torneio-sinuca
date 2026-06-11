@@ -527,12 +527,21 @@ tr.relegation td:first-child, .rank-relegation td:first-child { border-left: 4px
   z-index: 30;
   top: calc(100% + 8px);
   right: 0;
-  width: min(280px, calc(100vw - 28px));
+  width: min(340px, calc(100vw - 28px));
+  max-height: min(70vh, 560px);
+  overflow-y: auto;
   padding: 6px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #101a24;
   box-shadow: var(--shadow);
+}
+.telao-radio-category {
+  padding: 11px 10px 5px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
 }
 .telao-radio-menu button {
   width: 100%;
@@ -543,9 +552,21 @@ tr.relegation td:first-child, .rank-relegation td:first-child { border-left: 4px
   background: transparent;
   text-align: left;
 }
+.telao-radio-menu button strong,
+.telao-radio-menu button span {
+  display: block;
+}
+.telao-radio-menu button span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
 .telao-radio-menu button:hover,
 .telao-radio-menu button[aria-checked="true"] {
   background: rgba(40,209,124,.14);
+}
+.telao-radio-menu button[aria-checked="true"] span {
+  color: var(--text);
 }
 #telao-countdown {
   min-width: 190px;

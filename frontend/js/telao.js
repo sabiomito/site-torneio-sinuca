@@ -8,9 +8,20 @@ const DEFAULT_TV_CONFIG = {
   filters: {},
 };
 const RADIO_STATIONS = [
-  {id: 'groove-salad', name: 'SomaFM Groove Salad', url: 'https://ice1.somafm.com/groovesalad-128-mp3'},
-  {id: 'secret-agent', name: 'SomaFM Secret Agent', url: 'https://ice1.somafm.com/secretagent-128-mp3'},
-  {id: 'drone-zone', name: 'SomaFM Drone Zone', url: 'https://ice1.somafm.com/dronezone-128-mp3'},
+  {id: 'buteco-sertanejo', name: 'Rádio Buteco Sertanejo', category: 'Sertanejo clássico', genre: 'Modão, viola e sertanejo romântico', url: 'https://stream.zeno.fm/6kumndewqbruv'},
+  {id: 'mgt-classicos-sertanejos', name: 'MGT Clássicos Sertanejos', category: 'Sertanejo clássico', genre: 'Clássicos e duplas sertanejas', url: 'https://cast.mgtradio.net/radio/8000/aac'},
+  {id: 'sertaneja-1067', name: 'Sertaneja 106.7', category: 'Sertanejo clássico', genre: 'Sertanejo popular e modão', url: 'https://sc4s.cdn.upx.com:8067/stream'},
+  {id: 'so-forro-antigas', name: 'Só Forró das Antigas', category: 'Forró', genre: 'Forró romântico das antigas', url: 'https://ssl.xcast.com.br:7132/stremig'},
+  {id: 'radio-forro', name: 'Rádio Forró', category: 'Forró', genre: 'Forró tradicional e dançante', url: 'https://stm5.painelcast.com:7600/stream'},
+  {id: 'mgt-forro', name: 'MGT Forró', category: 'Forró', genre: 'Forró e sucessos nordestinos', url: 'https://cast.mgtradio.net/radio/8050/aac'},
+  {id: 'mgt-sertanejo-universitario', name: 'MGT Sertanejo Universitário', category: 'Sertanejo universitário', genre: 'Sertanejo universitário e atual', url: 'https://cast.mgtradio.net/radio/8020/aac'},
+  {id: 'hunter-sertanejo', name: 'Hunter Sertanejo', category: 'Sertanejo universitário', genre: 'Sertanejo atual e universitário', url: 'https://live.hunter.fm/sertanejo_normal'},
+  {id: 'saudade-fm', name: 'Saudade FM', category: 'Românticas e flashback', genre: 'Românticas nacionais e internacionais', url: 'https://playerservices.streamtheworld.com/api/livestream-redirect/SAUDADE_FMAAC.aac'},
+  {id: 'antena-1', name: 'Antena 1', category: 'Românticas e flashback', genre: 'Clássicos internacionais e flashback', url: 'https://antenaone.crossradio.com.br/stream/1;'},
+  {id: 'nova-brasil', name: 'Nova Brasil FM', category: 'Música brasileira', genre: 'MPB e música brasileira', url: 'https://playerservices.streamtheworld.com/api/livestream-redirect/NOVABRASIL_SPAAC.aac'},
+  {id: 'bh-fm', name: 'BH FM', category: 'Música brasileira', genre: 'Sucessos nacionais e sertanejo', url: 'https://playerservices.streamtheworld.com/api/livestream-redirect/BHFMAAC.aac'},
+  {id: 'mgt-brasil-hits', name: 'MGT Brasil Hits', category: 'Música brasileira', genre: 'Hits nacionais variados', url: 'https://cast.mgtradio.net/radio/8010/aac'},
+  {id: 'hunter-pagode', name: 'Hunter Pagode', category: 'Música brasileira', genre: 'Pagode e samba', url: 'https://live.hunter.fm/pagode_normal'},
 ];
 
 let currentMode = 'tables';
@@ -297,11 +308,18 @@ function showCurrentMatch() {
 function renderRadioMenu() {
   const selected = localStorage.getItem('sinuca_telao_radio') || RADIO_STATIONS[0].id;
   const menu = document.getElementById('telao-radio-menu');
-  menu.innerHTML = RADIO_STATIONS.map(station => `
-    <button type="button" role="menuitemradio" aria-checked="${station.id === selected ? 'true' : 'false'}" data-radio-id="${station.id}">
-      ${escapeHtml(station.name)}
-    </button>
-  `).join('');
+  let previousCategory = '';
+  menu.innerHTML = RADIO_STATIONS.map(station => {
+    const category = station.category === previousCategory
+      ? ''
+      : `<div class="telao-radio-category">${escapeHtml(station.category)}</div>`;
+    previousCategory = station.category;
+    return `${category}
+      <button type="button" role="menuitemradio" aria-checked="${station.id === selected ? 'true' : 'false'}" data-radio-id="${station.id}">
+        <strong>${escapeHtml(station.name)}</strong>
+        <span>${escapeHtml(station.genre)}</span>
+      </button>`;
+  }).join('');
   menu.querySelectorAll('[data-radio-id]').forEach(button => {
     button.addEventListener('click', () => {
       selectRadio(button.dataset.radioId, true);
@@ -328,7 +346,10 @@ function updateRadioButton() {
 function selectRadio(stationId, autoplay = false) {
   const station = RADIO_STATIONS.find(item => item.id === stationId) || RADIO_STATIONS[0];
   const audio = document.getElementById('telao-radio-audio');
+  const menuButton = document.getElementById('telao-radio-menu-button');
   localStorage.setItem('sinuca_telao_radio', station.id);
+  menuButton.title = `Selecionar rádio · ${station.name}`;
+  menuButton.setAttribute('aria-label', menuButton.title);
   if (audio.src !== station.url) {
     audio.src = station.url;
     audio.load();

@@ -684,7 +684,18 @@ def validate_telao(driver, sponsors, matches, tv_config):
 
     click(driver, driver.find_element(By.ID, "telao-radio-menu-button"))
     wait(driver).until(EC.visibility_of_element_located((By.ID, "telao-radio-menu")))
-    assert len(driver.find_elements(By.CSS_SELECTOR, "#telao-radio-menu [data-radio-id]")) == 3
+    assert len(driver.find_elements(By.CSS_SELECTOR, "#telao-radio-menu [data-radio-id]")) == 14
+    radio_categories = {
+        item.text.lower()
+        for item in driver.find_elements(By.CSS_SELECTOR, "#telao-radio-menu .telao-radio-category")
+    }
+    assert {
+        "sertanejo clássico",
+        "forró",
+        "sertanejo universitário",
+        "românticas e flashback",
+        "música brasileira",
+    } == radio_categories
     driver.execute_script(
         """
         const audio = document.getElementById('telao-radio-audio');
@@ -699,8 +710,8 @@ def validate_telao(driver, sponsors, matches, tv_config):
         };
         """
     )
-    click(driver, driver.find_element(By.CSS_SELECTOR, '[data-radio-id="secret-agent"]'))
-    assert "secretagent-128-mp3" in driver.find_element(By.ID, "telao-radio-audio").get_attribute("src")
+    click(driver, driver.find_element(By.CSS_SELECTOR, '[data-radio-id="mgt-classicos-sertanejos"]'))
+    assert "/radio/8000/aac" in driver.find_element(By.ID, "telao-radio-audio").get_attribute("src")
     assert driver.find_element(By.ID, "telao-radio-toggle").get_attribute("title") == "Desligar rádio"
     click(driver, driver.find_element(By.ID, "telao-radio-toggle"))
     assert driver.find_element(By.ID, "telao-radio-toggle").get_attribute("title") == "Ligar rádio"
