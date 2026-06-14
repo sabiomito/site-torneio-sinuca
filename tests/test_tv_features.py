@@ -33,6 +33,8 @@ def match(index, *, finished=False, division=1, chave="A", place="place-1"):
 def test_tv_config_defaults_and_limits():
     assert app.normalize_tv_config() == {
         "table_seconds": 60,
+        "bracket_seconds": 60,
+        "bracket_game_filter": "all",
         "sponsor_seconds": 30,
         "match_seconds": 5,
         "filters": {
@@ -47,14 +49,38 @@ def test_tv_config_defaults_and_limits():
     }
     normalized = app.normalize_tv_config({
         "table_seconds": 0,
+        "bracket_seconds": 14,
+        "bracket_game_filter": "pending",
         "sponsor_seconds": 99999,
         "match_seconds": 8,
         "filters": {"status": "invalid"},
     })
     assert normalized["table_seconds"] == 1
+    assert normalized["bracket_seconds"] == 14
+    assert normalized["bracket_game_filter"] == "pending"
     assert normalized["sponsor_seconds"] == 3600
     assert normalized["match_seconds"] == 8
     assert normalized["filters"]["status"] == ""
+    assert app.normalize_tv_config({"bracket_game_filter": "invalid"})["bracket_game_filter"] == "all"
+    assert app.normalize_tv_config({}, "pending")["bracket_game_filter"] == "pending"
+
+
+def test_tv_bracket_game_filter_is_persisted_in_both_config_locations(monkeypatch):
+    current = {
+        "pk": "CONFIG",
+        "sk": "TOURNAMENT",
+        "type": "CONFIG",
+        "tv_config": app.normalize_tv_config(),
+    }
+    saved = {}
+    monkeypatch.setattr(app, "get_config", lambda: current)
+    monkeypatch.setattr(app, "put_item", lambda item: saved.update(item))
+
+    result = app.save_tv_config({"bracket_game_filter": "pending"})
+
+    assert result["bracket_game_filter"] == "pending"
+    assert saved["tv_config"]["bracket_game_filter"] == "pending"
+    assert saved["tv_bracket_game_filter"] == "pending"
 
 
 def test_match_filters_support_finished_pending_and_combination():

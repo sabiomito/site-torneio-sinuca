@@ -1,5 +1,6 @@
 import base64
 import io
+import random
 import re
 import time
 from collections import defaultdict
@@ -23,7 +24,9 @@ GROUPS = [
     {"division": 2, "chave": "B", "place": "Sala Dourada"},
 ]
 PLAYERS_PER_GROUP = 16
-MAIN_ROUNDS_PER_GROUP = 5
+INITIAL_ROUNDS_PER_GROUP = 5
+POINTS_ROUNDS_PER_GROUP = PLAYERS_PER_GROUP - 1
+RESULT_RANDOM_SEED = 20260712
 
 
 def progress(message):
@@ -110,7 +113,7 @@ def configure_tournament_through_ui(driver):
     wait(driver).until(
         lambda browser: len(browser.find_elements(By.CSS_SELECTOR, "#current-rules-fields .rule-card")) == 2
     )
-    values = [(1, 4, 4), (2, 4, 4)]
+    values = [(1, 8, 4), (2, 8, 4)]
     for card_index, (key_count, promotion, relegation) in enumerate(values, start=1):
         for selector, value in [
             (".rule-key-count", key_count),
@@ -128,7 +131,10 @@ def configure_tournament_through_ui(driver):
         driver,
         lambda state: state["config"]["division_count"] == 2
         and state["config"]["rules"]["1"]["key_count"] == 1
-        and state["config"]["rules"]["2"]["key_count"] == 2,
+        and state["config"]["rules"]["2"]["key_count"] == 2
+        and state["config"]["rules"]["1"]["promotion_count"] == 8
+        and state["config"]["rules"]["2"]["promotion_count"] == 8
+        and state["config"]["show_bracket_tv"] is True,
     )
 
 
@@ -176,8 +182,9 @@ def edit_player_through_ui(driver, player_id, name, phrase, photo_path):
 
 
 def create_and_update_players_through_ui(driver, tmp_path):
-    progress("Criando 48 jogadores e atualizando foto/frase duas vezes pela interface...")
+    progress("Criando 48 jogadores com foto; validando a troca completa da foto em um jogador...")
     players_by_group = {}
+    created_count = 0
     for group in GROUPS:
         key = (group["division"], group["chave"])
         players_by_group[key] = []
@@ -211,32 +218,40 @@ def create_and_update_players_through_ui(driver, tmp_path):
             )
             first_player = next(player for player in first_state["players"] if player["player_id"] == player_id)
             assert first_player["short_message"] == initial_phrase
-            assert_saved_image(first_player["photo_url"], initial_id, (400, 400))
-            initial_photo_url = first_player["photo_url"]
+            assert first_player["photo_url"]
+            saved_player = first_player
+            expected_phrase = initial_phrase
 
-            updated_id = f"updated-{name}"
-            updated_phrase = f"Frase atualizada {name}"
-            edit_player_through_ui(
-                driver,
-                player_id,
-                name,
-                updated_phrase,
-                image_path(tmp_path, updated_id),
-            )
-            updated_state = wait_admin_state(
-                driver,
-                lambda current: any(player["player_id"] == player_id for player in current["players"]),
-            )
-            updated = next(player for player in updated_state["players"] if player["player_id"] == player_id)
-            assert updated["short_message"] == updated_phrase
-            assert updated["photo_url"] != initial_photo_url
-            assert_saved_image(updated["photo_url"], updated_id, (400, 400))
-            with pytest.raises(HTTPError) as old_photo_error:
-                get_bytes(initial_photo_url)
-            assert old_photo_error.value.code == 404
-            updated["expected_phrase"] = updated_phrase
-            players_by_group[key].append(updated)
-            progress(f"Jogador {len(sum(players_by_group.values(), []))}/48 concluido: {name}")
+            if created_count == 0:
+                assert_saved_image(first_player["photo_url"], initial_id, (400, 400))
+                initial_photo_url = first_player["photo_url"]
+                updated_id = f"updated-{name}"
+                expected_phrase = f"Frase atualizada {name}"
+                edit_player_through_ui(
+                    driver,
+                    player_id,
+                    name,
+                    expected_phrase,
+                    image_path(tmp_path, updated_id),
+                )
+                updated_state = wait_admin_state(
+                    driver,
+                    lambda current: any(player["player_id"] == player_id for player in current["players"]),
+                )
+                saved_player = next(
+                    player for player in updated_state["players"] if player["player_id"] == player_id
+                )
+                assert saved_player["short_message"] == expected_phrase
+                assert saved_player["photo_url"] != initial_photo_url
+                assert_saved_image(saved_player["photo_url"], updated_id, (400, 400))
+                with pytest.raises(HTTPError) as old_photo_error:
+                    get_bytes(initial_photo_url)
+                assert old_photo_error.value.code == 404
+
+            saved_player["expected_phrase"] = expected_phrase
+            players_by_group[key].append(saved_player)
+            created_count += 1
+            progress(f"Jogador {created_count}/48 concluido: {name}")
     return players_by_group
 
 
@@ -319,23 +334,22 @@ def filter_admin_matches(driver, division, chave):
     wait(driver).until(lambda browser: browser.find_elements(By.CSS_SELECTOR, "#admin-matches .result-form"))
 
 
-def save_result_through_ui(driver, match_id, loser_balls):
-    filter_admin_matches(
-        driver,
-        next(m["division"] for m in admin_state(driver)["matches"] if m["match_id"] == match_id),
-        next(m["chave"] for m in admin_state(driver)["matches"] if m["match_id"] == match_id),
-    )
+def save_result_through_ui(driver, match_id, loser_balls, winner_id=None, prepare_filter=True):
+    current_match = next(m for m in admin_state(driver)["matches"] if m["match_id"] == match_id)
+    if prepare_filter:
+        filter_admin_matches(driver, current_match["division"], current_match["chave"])
     form = wait(driver).until(
         EC.presence_of_element_located((By.CSS_SELECTOR, f'.result-form[data-match-id="{match_id}"]'))
     )
     winner = form.find_element(By.NAME, "winner_id")
-    Select(winner).select_by_index(1)
+    winner_id = winner_id or current_match["player1_id"]
+    Select(winner).select_by_value(winner_id)
     first_score = form.find_element(By.NAME, "balls_p1")
     second_score = form.find_element(By.NAME, "balls_p2")
     first_score.clear()
-    first_score.send_keys("7")
+    first_score.send_keys("7" if winner_id == current_match["player1_id"] else str(loser_balls))
     second_score.clear()
-    second_score.send_keys(str(loser_balls))
+    second_score.send_keys("7" if winner_id == current_match["player2_id"] else str(loser_balls))
     click(driver, form.find_element(By.CSS_SELECTOR, 'button[type="submit"]'))
     wait_admin_state(
         driver,
@@ -428,12 +442,12 @@ def create_rounds_through_ui(driver, players_by_group):
     save_result_through_ui(driver, first_round[1][0]["match_id"], 2)
     save_result_through_ui(driver, first_round[1][1]["match_id"], 3)
     create_manual_conflict_round_through_ui(driver, first_group, players_by_group[(1, "A")])
-    for round_index in range(3, MAIN_ROUNDS_PER_GROUP + 1):
+    for round_index in range(3, INITIAL_ROUNDS_PER_GROUP + 1):
         created = create_auto_round_through_ui(driver, first_group, round_index)
         assert created and len(created[1]) == 8
 
     for group in GROUPS[1:]:
-        for round_index in range(1, MAIN_ROUNDS_PER_GROUP + 1):
+        for round_index in range(1, INITIAL_ROUNDS_PER_GROUP + 1):
             created = create_auto_round_through_ui(driver, group, round_index)
             assert created and len(created[1]) == 8
 
@@ -444,53 +458,97 @@ def create_rounds_through_ui(driver, players_by_group):
             for item in state["rounds"]
             if item["division"] == group["division"] and item["chave"] == group["chave"]
         ]
-        assert len(rounds) == MAIN_ROUNDS_PER_GROUP
+        assert len(rounds) == INITIAL_ROUNDS_PER_GROUP
         assert {item["place_name"] for item in rounds} == {group["place"]}
 
 
-def exhaust_until_partial_round_through_ui(driver):
-    progress("Criando rodadas pela interface ate aparecer uma rodada automatica parcial...")
-    group = GROUPS[0]
-    partial = None
-    date_index = 6
-    while date_index <= 31:
-        created = create_auto_round_through_ui(
-            driver,
-            group,
-            round_index=date_index,
-            date_index=date_index,
-            timeout=45,
-        )
-        if created is None:
-            break
-        _, matches = created
-        if len(matches) < 8:
-            partial = created
-        date_index += 1
-    assert partial is not None
-    assert 1 <= len(partial[1]) < 8
+def finish_points_rounds_through_ui(driver):
+    progress("Criando todas as rodadas restantes ate completar a fase de pontos...")
+    for group in GROUPS:
+        while True:
+            state = admin_state(driver)
+            requirement = next(
+                item
+                for item in state["round_requirements"]
+                if item["division"] == group["division"] and item["chave"] == group["chave"]
+            )
+            if requirement["remaining_pairs"] == 0:
+                break
+            current_rounds = [
+                item
+                for item in state["rounds"]
+                if item["division"] == group["division"] and item["chave"] == group["chave"]
+            ]
+            round_index = len(current_rounds) + 1
+            created = create_auto_round_through_ui(
+                driver,
+                group,
+                round_index=round_index,
+                date_index=round_index,
+                timeout=90,
+            )
+            assert created is not None
+            assert 1 <= len(created[1]) <= 8
+
+    state = admin_state(driver)
+    for group in GROUPS:
+        matches = [
+            match
+            for match in state["matches"]
+            if match["division"] == group["division"] and match["chave"] == group["chave"]
+        ]
+        pairs = {
+            tuple(sorted((match["player1_id"], match["player2_id"])))
+            for match in matches
+        }
+        assert len(matches) == PLAYERS_PER_GROUP * (PLAYERS_PER_GROUP - 1) // 2
+        assert len(pairs) == len(matches)
 
 
-def save_mid_tournament_results_through_ui(driver):
-    progress("Cadastrando resultados em todas as chaves pela interface...")
+def save_all_points_results_through_ui(driver):
+    progress("Cadastrando todos os resultados da fase de pontos com aleatoriedade reproduzivel...")
+    rng = random.Random(RESULT_RANDOM_SEED)
     expected = defaultdict(lambda: {"played": 0, "wins": 0, "points": 0, "for": 0, "against": 0})
     state = admin_state(driver)
-    already_finished = [match for match in state["matches"] if match["is_finished"]]
-    selected = list(already_finished)
+    pending_by_group = {}
+    total_pending = 0
+    saved_count = 0
     for group in GROUPS:
-        pending = [
+        key = (group["division"], group["chave"])
+        pending_by_group[key] = sorted([
             match
             for match in state["matches"]
             if match["division"] == group["division"]
             and match["chave"] == group["chave"]
             and not match["is_finished"]
-        ]
-        needed = 4 if group != GROUPS[0] else 2
-        for index, match in enumerate(pending[:needed]):
-            save_result_through_ui(driver, match["match_id"], index + 1)
-            selected.append(next(m for m in admin_state(driver)["matches"] if m["match_id"] == match["match_id"]))
+        ], key=lambda match: match["match_id"])
+        total_pending += len(pending_by_group[key])
 
-    for match in selected:
+    for group in GROUPS:
+        pending = pending_by_group[(group["division"], group["chave"])]
+        if pending:
+            filter_admin_matches(driver, group["division"], group["chave"])
+        for match in pending:
+            winner_id = rng.choice([match["player1_id"], match["player2_id"]])
+            loser_balls = rng.randint(0, 6)
+            save_result_through_ui(
+                driver,
+                match["match_id"],
+                loser_balls,
+                winner_id=winner_id,
+                prepare_filter=False,
+            )
+            saved_count += 1
+            progress(
+                f"Resultado {saved_count}/{total_pending} salvo: "
+                f"{group['division']}a divisao / chave {group['chave']}"
+            )
+
+    final_state = admin_state(driver)
+    points_matches = [match for match in final_state["matches"] if match.get("phase") != "knockout"]
+    assert points_matches
+    assert all(match["is_finished"] for match in points_matches)
+    for match in points_matches:
         first = expected[match["player1_id"]]
         second = expected[match["player2_id"]]
         first["played"] += 1
@@ -502,7 +560,6 @@ def save_mid_tournament_results_through_ui(driver):
         winner = first if match["winner_id"] == match["player1_id"] else second
         winner["wins"] += 1
         winner["points"] += 3
-    final_state = admin_state(driver)
     latest = max(
         (match for match in final_state["matches"] if match["is_finished"]),
         key=lambda match: match.get("result_saved_at") or "",
@@ -524,6 +581,10 @@ def validate_standings(state, expected):
         assert row["balls_for"] == totals["for"]
         assert row["balls_against"] == totals["against"]
         assert row["balls_balance"] == totals["for"] - totals["against"]
+    for division in state["standings"].values():
+        for group_rows in division.values():
+            assert all(row["played"] == POINTS_ROUNDS_PER_GROUP for row in group_rows)
+            assert len([row for row in group_rows if row["rank_status"] == "promotion"]) == 8
 
 
 def wait_for_download(directory, suffix, timeout=30):
@@ -602,18 +663,19 @@ def validate_public_filters_share_and_pdf(driver, state):
 
 
 def validate_player_profile(driver, player, state):
-    progress("Validando perfil publico, jogos e proxima partida...")
+    progress("Validando perfil publico e historico completo da fase de pontos...")
     matches = [
         match
         for match in state["matches"]
         if match["player1_id"] == player["player_id"] or match["player2_id"] == player["player_id"]
     ]
-    assert any(not match["is_finished"] for match in matches)
+    assert matches
+    assert all(match["is_finished"] for match in matches)
     driver.get(f"{BASE_URL}{player['profile_url']}")
     wait(driver).until(EC.text_to_be_present_in_element((By.ID, "profile-root"), player["name"]))
     root = driver.find_element(By.ID, "profile-root")
     assert player["expected_phrase"] in root.text
-    assert "Próximo jogo" in root.text
+    assert "Nenhum próximo jogo pendente encontrado." in root.text
     assert len(driver.find_elements(By.CSS_SELECTOR, "#profile-root .match-row")) == len(matches)
     assert driver.find_element(By.CSS_SELECTOR, ".profile-photo").get_attribute("src").endswith(player["photo_url"])
     profile_html = get_bytes(player["profile_url"]).decode("utf-8")
@@ -627,6 +689,8 @@ def configure_telao_through_ui(driver):
     open_admin(driver)
     open_section(driver, "tv-config")
     set_input(driver, "tv-table-seconds", "8")
+    set_input(driver, "tv-bracket-seconds", "2")
+    select_value(driver, "tv-bracket-game-filter", "pending")
     set_input(driver, "tv-sponsor-seconds", "4")
     set_input(driver, "tv-match-seconds", "2")
     select_value(driver, "tv-filter-status", "finished")
@@ -634,6 +698,8 @@ def configure_telao_through_ui(driver):
     return wait_admin_state(
         driver,
         lambda current: current["config"]["tv_config"]["table_seconds"] == 8
+        and current["config"]["tv_config"]["bracket_seconds"] == 2
+        and current["config"]["tv_config"]["bracket_game_filter"] == "pending"
         and current["config"]["tv_config"]["sponsor_seconds"] == 4
         and current["config"]["tv_config"]["match_seconds"] == 2
         and current["config"]["tv_config"]["filters"]["status"] == "finished"
@@ -652,6 +718,7 @@ def current_sponsor_shape(driver):
 
 def validate_telao(driver, sponsors, matches, tv_config):
     table_seconds = tv_config["table_seconds"]
+    bracket_seconds = tv_config["bracket_seconds"]
     sponsor_seconds = tv_config["sponsor_seconds"]
     match_seconds = tv_config["match_seconds"]
     progress(
@@ -746,9 +813,21 @@ def validate_telao(driver, sponsors, matches, tv_config):
     assert all(card["top"] >= 0 and card["bottom"] <= 1080 for card in layout["cards"])
     assert all(not card["tableOverflowX"] and not card["tableOverflowY"] for card in layout["cards"])
 
-    first_sponsor_shape = wait(driver, table_seconds + 8).until(current_sponsor_shape)
+    bracket_count = driver.execute_script(
+        "return Object.keys((telaoState && telaoState.brackets) || {}).length;"
+    )
+    assert bracket_count == 2
+    wait(driver, table_seconds + 8).until(
+        EC.presence_of_element_located((By.CSS_SELECTOR, ".telao-bracket-card"))
+    )
+    assert driver.find_element(By.ID, "telao-countdown").text.startswith("Chaveamento")
+    assert driver.find_elements(By.CSS_SELECTOR, ".telao-bracket-card .bracket-photo")
+
+    bracket_cycle_seconds = bracket_count * bracket_seconds
+    first_sponsor_shape = wait(driver, bracket_cycle_seconds + 10).until(current_sponsor_shape)
     first_sponsor_elapsed = time.monotonic() - tables_started_at
-    assert max(0, table_seconds - 2) <= first_sponsor_elapsed <= table_seconds + 8
+    expected_sponsor_start = table_seconds + bracket_cycle_seconds
+    assert max(0, expected_sponsor_start - 3) <= first_sponsor_elapsed <= expected_sponsor_start + 10
     assert first_sponsor_shape == "rect"
     assert driver.find_element(By.ID, "telao-countdown").text.startswith("Patrocinadores")
     assert len(driver.find_elements(By.CSS_SELECTOR, ".sponsor-tv-card")) == len(sponsors)
@@ -865,9 +944,12 @@ def validate_telao(driver, sponsors, matches, tv_config):
         lambda browser: len(browser.find_elements(By.CSS_SELECTOR, ".telao-card")) == 3
     )
     second_tables_started_at = time.monotonic()
-    second_sponsor_shape = wait(driver, table_seconds + 8).until(current_sponsor_shape)
+    wait(driver, table_seconds + 8).until(
+        EC.presence_of_element_located((By.CSS_SELECTOR, ".telao-bracket-card"))
+    )
+    second_sponsor_shape = wait(driver, bracket_cycle_seconds + 10).until(current_sponsor_shape)
     second_sponsor_elapsed = time.monotonic() - second_tables_started_at
-    assert max(0, table_seconds - 2) <= second_sponsor_elapsed <= table_seconds + 8
+    assert max(0, expected_sponsor_start - 3) <= second_sponsor_elapsed <= expected_sponsor_start + 10
     assert second_sponsor_shape == "square"
     assert all(
         "/square-" in image.get_attribute("src")
@@ -876,7 +958,14 @@ def validate_telao(driver, sponsors, matches, tv_config):
 
     pending = driver.execute_script(
         """
-        const match = (telaoState.matches || []).find(item => !item.is_finished);
+        const source = (telaoState.tv_matches || [])[0];
+        const match = source ? {
+          ...source,
+          is_finished: false,
+          winner_id: '',
+          balls_p1: 0,
+          balls_p2: 0
+        } : null;
         if (!match) return null;
         renderMatch(match);
         return match;
@@ -911,8 +1000,8 @@ def test_complete_tournament_entirely_through_ui(driver, tmp_path):
     players_by_group = create_and_update_players_through_ui(driver, tmp_path)
     sponsors = create_sponsors_through_ui(driver, tmp_path)
     create_rounds_through_ui(driver, players_by_group)
-    exhaust_until_partial_round_through_ui(driver)
-    expected, _latest_result, state = save_mid_tournament_results_through_ui(driver)
+    finish_points_rounds_through_ui(driver)
+    expected, _latest_result, state = save_all_points_results_through_ui(driver)
     state = configure_telao_through_ui(driver)
     validate_standings(state, expected)
 

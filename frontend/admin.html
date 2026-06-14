@@ -54,6 +54,16 @@
                 <button type="button" id="build-rules" class="secondary">Atualizar divisões</button>
               </div>
             </div>
+            <div class="display-options">
+              <label class="checkbox-label">
+                <input type="checkbox" id="show-bracket-scoreboard">
+                Exibir chaveamento no placar geral
+              </label>
+              <label class="checkbox-label">
+                <input type="checkbox" id="show-bracket-tv">
+                Exibir chaveamento no telão
+              </label>
+            </div>
             <div id="current-rules-fields" class="rule-grid"></div>
             <button type="submit">Salvar configurações</button>
           </form>
@@ -110,6 +120,31 @@
 
           <h3 class="subheading">Rodadas cadastradas</h3>
           <div class="scroll-box small" id="rounds-list"></div>
+        </div>
+      </section>
+
+      <section class="card collapsible closed" data-section="knockout">
+        <button class="collapse-title" type="button"><span>▾</span> Rodadas do chaveamento</button>
+        <div class="collapse-body">
+          <p class="muted">Antes da primeira rodada, a prévia acompanha a classificação atual. Ao criar os primeiros jogos, os participantes e cruzamentos ficam fixos. Excluir a primeira rodada do chaveamento desfaz essa fixação.</p>
+          <div id="knockout-status" class="requirement-grid"></div>
+          <form id="knockout-round-form" class="knockout-round-form">
+            <label>Divisão
+              <select id="knockout-division"></select>
+            </label>
+            <label>Nome do bar / local
+              <input type="text" id="knockout-name" required placeholder="Ex.: Bar do João">
+            </label>
+            <label>Data
+              <input type="date" id="knockout-date" required>
+            </label>
+            <label>Horário inicial
+              <input type="time" id="knockout-start-time" value="09:00" required>
+            </label>
+            <button type="submit">Criar confrontos definidos</button>
+          </form>
+          <h3 class="subheading">Rodadas de chaveamento cadastradas</h3>
+          <div class="scroll-box small" id="knockout-rounds-list"></div>
         </div>
       </section>
 
@@ -171,9 +206,12 @@
         <button class="collapse-title" type="button"><span>▾</span> Configurações do telão</button>
         <div class="collapse-body">
           <form id="tv-config-form" class="stack-form">
-            <div class="grid-3">
+            <div class="grid-4">
               <label>Tempo da tabela, em segundos
                 <input type="number" id="tv-table-seconds" min="1" max="3600" required>
+              </label>
+              <label>Tempo de cada chaveamento, em segundos
+                <input type="number" id="tv-bracket-seconds" min="1" max="3600" required>
               </label>
               <label>Tempo dos patrocinadores, em segundos
                 <input type="number" id="tv-sponsor-seconds" min="1" max="3600" required>
@@ -182,6 +220,12 @@
                 <input type="number" id="tv-match-seconds" min="1" max="3600" required>
               </label>
             </div>
+            <label>Jogos exibidos no chaveamento
+              <select id="tv-bracket-game-filter">
+                <option value="all">Todos os jogos</option>
+                <option value="pending">Próximos jogos</option>
+              </select>
+            </label>
             <div class="section-title compact-title">
               <h3>Partidas exibidas</h3>
               <span>sem filtros, o telão usa os últimos 20 resultados</span>

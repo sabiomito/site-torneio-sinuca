@@ -136,7 +136,7 @@ function collectRules(containerId) {
 
 function fillDivisionAndKeyControls() {
   const count = adminState.config.division_count;
-  ['player-division', 'round-division', 'admin-filter-division'].forEach(id => {
+  ['player-division', 'round-division', 'knockout-division', 'admin-filter-division'].forEach(id => {
     const first = id === 'admin-filter-division' ? 'Todas' : null;
     fillDivisionSelect(document.getElementById(id), count, first);
   });
@@ -147,18 +147,23 @@ function fillDivisionAndKeyControls() {
 function renderTvConfig() {
   const tv = adminState.config.tv_config || {
     table_seconds: 60,
+    bracket_seconds: 60,
+    bracket_game_filter: 'all',
     sponsor_seconds: 30,
     match_seconds: 5,
     filters: {},
   };
   const filters = tv.filters || {};
   document.getElementById('tv-table-seconds').value = tv.table_seconds || 60;
+  document.getElementById('tv-bracket-seconds').value = tv.bracket_seconds || 60;
+  const savedBracketFilter = tv.bracket_game_filter || adminState.config.tv_bracket_game_filter;
+  document.getElementById('tv-bracket-game-filter').value = savedBracketFilter === 'pending' ? 'pending' : 'all';
   document.getElementById('tv-sponsor-seconds').value = tv.sponsor_seconds || 30;
   document.getElementById('tv-match-seconds').value = tv.match_seconds || 5;
   fillSelect(document.getElementById('tv-filter-date'), adminState.dates, 'date', d => fmtDate(d.date), 'Todas');
   fillSelect(document.getElementById('tv-filter-place'), adminState.places, 'place_id', 'name', 'Todos');
   fillSelect(document.getElementById('tv-filter-player'), adminState.players, 'player_id', p => `${p.name} — ${divisionName(p.division)} / Chave ${normalizeChave(p.chave)}`, 'Todos');
-  fillSelect(document.getElementById('tv-filter-round'), adminState.rounds, 'round_id', r => `${fmtDate(r.date)} · ${r.name} · ${divisionName(r.division)} · Chave ${normalizeChave(r.chave)} · Rodada ${r.round_number || ''}`, 'Todas');
+  fillSelect(document.getElementById('tv-filter-round'), adminState.rounds, 'round_id', r => `${fmtDate(r.date)} · ${r.name} · ${divisionName(r.division)} · ${roundStageLabel(r)}`, 'Todas');
   fillDivisionSelect(document.getElementById('tv-filter-division'), adminState.config.division_count, 'Todas');
   fillAllChavesFilter(document.getElementById('tv-filter-chave'), 'Todas');
   Object.entries({
@@ -177,23 +182,56 @@ function renderTvConfig() {
   });
 }
 
+const ADMIN_MATCH_FILTER_IDS = [
+  'admin-filter-date',
+  'admin-filter-round',
+  'admin-filter-place',
+  'admin-filter-player',
+  'admin-filter-division',
+  'admin-filter-chave',
+  'admin-filter-status',
+];
+
+function captureAdminMatchFilters() {
+  return Object.fromEntries(ADMIN_MATCH_FILTER_IDS.map(id => {
+    const element = document.getElementById(id);
+    return [id, element?.value || ''];
+  }));
+}
+
+function restoreAdminMatchFilters(filters) {
+  Object.entries(filters || {}).forEach(([id, value]) => {
+    const element = document.getElementById(id);
+    if (element && [...element.options].some(option => option.value === value)) {
+      element.value = value;
+    }
+  });
+}
+
 function renderAll() {
+  const preservedMatchFilters = captureAdminMatchFilters();
   adminState.rounds = adminState.rounds || [];
   adminState.matches = adminState.matches || [];
   adminState.round_requirements = adminState.round_requirements || [];
   adminState.sponsors = adminState.sponsors || [];
+  adminState.brackets = adminState.brackets || {};
   const config = adminState.config;
   document.getElementById('division-count').value = config.division_count;
   document.getElementById('duration-minutes').value = config.duration_minutes;
+  document.getElementById('show-bracket-scoreboard').checked = config.show_bracket_scoreboard !== false;
+  document.getElementById('show-bracket-tv').checked = config.show_bracket_tv !== false;
   buildRuleFields('current-rules-fields', config.division_count, config.rules || {});
   fillDivisionAndKeyControls();
   fillSelect(document.getElementById('admin-filter-date'), adminState.dates, 'date', d => fmtDate(d.date), 'Todas');
   fillSelect(document.getElementById('admin-filter-place'), adminState.places, 'place_id', 'name', 'Todos');
   fillSelect(document.getElementById('admin-filter-player'), adminState.players, 'player_id', p => `${p.name} — ${divisionName(p.division)} / Chave ${normalizeChave(p.chave)}`, 'Todos');
-  fillSelect(document.getElementById('admin-filter-round'), adminState.rounds, 'round_id', r => `${fmtDate(r.date)} · ${r.name} · ${divisionName(r.division)} · Chave ${normalizeChave(r.chave)} · Rodada ${r.round_number || ''}`, 'Todas');
+  fillSelect(document.getElementById('admin-filter-round'), adminState.rounds, 'round_id', r => `${fmtDate(r.date)} · ${r.name} · ${divisionName(r.division)} · ${roundStageLabel(r)}`, 'Todas');
   fillAllChavesFilter(document.getElementById('admin-filter-chave'), 'Todas');
+  restoreAdminMatchFilters(preservedMatchFilters);
   renderTvConfig();
   renderRoundRequirements();
+  renderKnockoutStatus();
+  renderKnockoutRoundsList();
   renderPlayersList();
   renderRoundsList();
   renderAdminMatches();
@@ -224,6 +262,88 @@ function renderRoundRequirements() {
   }).join('')}</div>`;
 }
 
+function renderKnockoutStatus() {
+  const container = document.getElementById('knockout-status');
+  if (!container) return;
+  const cards = [];
+  for (let division = 1; division <= Number(adminState.config.division_count || 0); division++) {
+    const bracket = adminState.brackets[String(division)] || null;
+    const chaves = adminState.standings?.[String(division)] || {};
+    const qualifiers = Object.values(chaves).flat().filter(row => row.rank_status === 'promotion');
+    const requirements = (adminState.round_requirements || []).filter(item => Number(item.division) === division);
+    const pointsRemaining = requirements.reduce((total, item) => total + Number(item.remaining_pairs || 0), 0);
+    const pointsComplete = requirements.length > 0 && pointsRemaining === 0;
+    const knockoutMatches = (adminState.matches || []).filter(match => match.phase === 'knockout' && Number(match.division) === division);
+    const pendingMatches = knockoutMatches.filter(match => !match.is_finished);
+    const readyNodes = [];
+    (bracket?.rounds || []).forEach(round => {
+      (round.nodes || []).forEach(node => {
+        if (node.player1?.player && node.player2?.player && !node.match) {
+          readyNodes.push({stage: round.name, roundNumber: round.round_number});
+        }
+      });
+    });
+    if (bracket?.third_place?.player1 && bracket?.third_place?.player2 && !bracket.third_place.match) {
+      readyNodes.push({stage: 'Disputa de 3º lugar', roundNumber: bracket.total_rounds});
+    }
+
+    const firstStage = bracket?.rounds?.[0]?.name || 'primeira fase';
+    const firstStageGames = (bracket?.rounds?.[0]?.nodes || []).filter(node => node.player1?.player && node.player2?.player).length;
+    let metric = `${qualifiers.length} classificado(s) em verde`;
+    let status = 'Configure ao menos 2 classificados verdes';
+    let cls = 'pending-box';
+    if (bracket?.finished) {
+      status = 'Chaveamento concluído';
+      cls = 'done-box';
+      metric = 'Todas as fases concluídas';
+    } else if (!bracket?.started && qualifiers.length >= 2) {
+      metric = `${firstStageGames} jogo(s) serão gerados na ${firstStage}`;
+      if (pointsComplete) {
+        status = `Pronto para gerar a primeira fase do chaveamento: ${firstStageGames} jogo(s) da ${firstStage}.`;
+        cls = 'done-box';
+      } else {
+        status = `Prévia atual. Faltam ${pointsRemaining} jogo(s) da fase de pontos para liberar a primeira fase.`;
+      }
+    } else if (readyNodes.length) {
+      const stages = [...new Set(readyNodes.map(item => item.stage))];
+      const stageLabel = stages.join(' e ');
+      const targetRound = readyNodes[0].roundNumber;
+      const targetRoundData = (bracket.rounds || []).find(round => Number(round.round_number) === Number(targetRound));
+      let totalStageGames = (targetRoundData?.nodes || []).length;
+      if (stages.includes('Disputa de 3º lugar')) totalStageGames += 1;
+      const earlierPending = pendingMatches.filter(match => Number(match.bracket_round || 1) < Number(targetRound)).length;
+      metric = earlierPending
+        ? `${earlierPending} jogo(s) faltando para definir os demais confrontos`
+        : `${readyNodes.length} de ${totalStageGames} jogo(s) já definido(s)`;
+      status = readyNodes.length === totalStageGames
+        ? `Pronto para gerar todos os ${readyNodes.length} jogo(s) da ${stageLabel}.`
+        : `Pronto para gerar ${readyNodes.length} de ${totalStageGames} jogo(s) já definido(s) da ${stageLabel}.`;
+      cls = 'done-box';
+    } else if (pendingMatches.length) {
+      const activeRound = Math.min(...pendingMatches.map(match => Number(match.bracket_round || 1)));
+      const activePending = pendingMatches.filter(match => Number(match.bracket_round || 1) === activeRound).length;
+      if (activeRound < Number(bracket.total_rounds || 1)) {
+        const nextRound = (bracket.rounds || []).find(round => Number(round.round_number) === activeRound + 1);
+        const nextStage = activeRound + 1 === Number(bracket.total_rounds)
+          ? 'Final e disputa de 3º lugar'
+          : (nextRound?.name || 'próxima fase');
+        metric = `${activePending} jogo(s) faltando para definir a próxima fase`;
+        status = `Finalize ${activePending} jogo(s) para definir todos os confrontos da ${nextStage}.`;
+      } else {
+        metric = `${activePending} jogo(s) faltando para concluir`;
+        status = `Finalize ${activePending} jogo(s) da fase final do chaveamento.`;
+      }
+    }
+    cards.push(`<div class="requirement-card ${cls}">
+      <strong>${divisionName(division)}</strong>
+      <span>${qualifiers.length} classificado(s) em verde</span>
+      <span>${escapeHtml(metric)}</span>
+      <b>${escapeHtml(status)}</b>
+    </div>`);
+  }
+  container.innerHTML = cards.join('');
+}
+
 function renderPlayersList() {
   const container = document.getElementById('players-list');
   if (!adminState.players.length) {
@@ -251,6 +371,51 @@ function renderPlayersList() {
   });
 }
 
+async function deleteRoundById(round) {
+  const message = round?.phase === 'knockout'
+    ? 'Excluir esta rodada do chaveamento? Os resultados desta rodada e todas as fases posteriores dependentes serão removidos. Ao excluir a primeira rodada, a chave volta a acompanhar a classificação atual.'
+    : 'Excluir esta rodada? Partidas pendentes serão removidas. Resultados já salvos ficam preservados.';
+  if (!confirm(message)) return;
+  try {
+    const data = await adminFetch('/admin/delete-round', {
+      method: 'POST',
+      body: JSON.stringify({round_id: round.round_id}),
+    });
+    adminState = data.state || await adminFetch('/admin/state');
+    preserveScroll(renderAll);
+    toast(data.bracket_unfrozen ? 'Primeira rodada excluída. O chaveamento voltou a acompanhar a classificação atual.' : 'Rodada excluída.');
+  } catch (err) {
+    toast(err.message);
+  }
+}
+
+function renderKnockoutRoundsList() {
+  const container = document.getElementById('knockout-rounds-list');
+  if (!container) return;
+  const rounds = (adminState.rounds || []).filter(round => round.phase === 'knockout');
+  if (!rounds.length) {
+    container.innerHTML = '<div class="empty">Nenhuma rodada de chaveamento criada.</div>';
+    return;
+  }
+  container.innerHTML = rounds.map(round => {
+    const matches = (adminState.matches || []).filter(match => match.round_id === round.round_id);
+    const pending = matches.filter(match => !match.is_finished).length;
+    return `<div class="list-item round-item">
+      <div>
+        <strong>${divisionName(round.division)} · ${escapeHtml(round.stage_name || 'Chaveamento')}</strong>
+        <div class="match-meta">${fmtDate(round.date)} · ${escapeHtml(round.start_time || '09:00')} · ${escapeHtml(round.name)} · ${matches.length} jogo(s) · ${pending} pendente(s)</div>
+      </div>
+      <button class="small danger" data-delete-knockout-round="${escapeHtml(round.round_id)}">Excluir rodada</button>
+    </div>`;
+  }).join('');
+  container.querySelectorAll('[data-delete-knockout-round]').forEach(button => {
+    button.addEventListener('click', () => {
+      const round = rounds.find(item => item.round_id === button.dataset.deleteKnockoutRound);
+      if (round) deleteRoundById(round);
+    });
+  });
+}
+
 function renderRoundsList() {
   const container = document.getElementById('rounds-list');
   const rounds = adminState.rounds || [];
@@ -263,7 +428,7 @@ function renderRoundsList() {
     return `<div class="list-item round-item">
       <div class="round-main">
         <strong>${escapeHtml(r.name)} · ${fmtDate(r.date)} · ${escapeHtml(r.start_time || '09:00')}</strong>
-        <div class="match-meta">${divisionName(r.division)} · Chave ${escapeHtml(normalizeChave(r.chave))} · Rodada ${r.round_number || '-'} · ${r.mode === 'manual' ? 'manual' : 'automática'} · ${matchCount} jogo(s)</div>
+        <div class="match-meta">${divisionName(r.division)} · ${escapeHtml(roundStageLabel(r))} · ${r.mode === 'knockout' ? 'chaveamento' : (r.mode === 'manual' ? 'manual' : 'automática')} · ${matchCount} jogo(s)</div>
         <div class="round-edit-line">
           <input type="text" data-round-name-input="${escapeHtml(r.round_id)}" value="${escapeHtml(r.name)}" aria-label="Novo nome da rodada">
           <button class="small secondary" data-update-round="${escapeHtml(r.round_id)}">Salvar nome</button>
@@ -284,11 +449,8 @@ function renderRoundsList() {
   });
   container.querySelectorAll('[data-delete-round]').forEach(btn => {
     btn.addEventListener('click', async () => {
-      if (!confirm('Excluir esta rodada? Partidas pendentes serão removidas. Resultados já salvos ficam preservados.')) return;
-      const data = await adminFetch('/admin/delete-round', {method: 'POST', body: JSON.stringify({round_id: btn.dataset.deleteRound})});
-      adminState = data.state || await adminFetch('/admin/state');
-      preserveScroll(renderAll);
-      toast('Rodada excluída.');
+      const round = rounds.find(item => item.round_id === btn.dataset.deleteRound);
+      if (round) await deleteRoundById(round);
     });
   });
 }
@@ -529,8 +691,9 @@ function renderAdminMatches() {
     const p1Win = match.winner_id === match.player1_id;
     const p2Win = match.winner_id === match.player2_id;
     const doubleLoss = Boolean(match.double_loss);
+    const isKnockout = match.phase === 'knockout';
     return `<form class="result-form ${match.is_finished ? 'finished' : ''}" data-match-id="${escapeHtml(match.match_id)}">
-      <div class="match-meta">${fmtDate(match.date)} · ${escapeHtml(match.time || '--:--')} até ${escapeHtml(match.end_time || '--:--')} · ${escapeHtml(match.place_name || 'Sem local')} · ${divisionName(match.division)} · Chave ${escapeHtml(normalizeChave(match.chave))} · Rodada ${escapeHtml(match.round_number || '-')} ${match.round_deleted ? '· rodada excluída' : ''} ${match.is_finished ? '· finalizada' : ''} ${doubleLoss ? '· derrota para ambos' : ''}</div>
+      <div class="match-meta">${fmtDate(match.date)} · ${escapeHtml(match.time || '--:--')} até ${escapeHtml(match.end_time || '--:--')} · ${escapeHtml(match.place_name || 'Sem local')} · ${divisionName(match.division)} · ${escapeHtml(matchStageLabel(match))} ${match.round_deleted ? '· rodada excluída' : ''} ${match.is_finished ? '· finalizada' : ''} ${doubleLoss ? '· derrota para ambos' : ''}</div>
       <strong>${escapeHtml(match.player1_name)} x ${escapeHtml(match.player2_name)}</strong>
       <div class="result-grid">
         <label>Resultado
@@ -538,7 +701,7 @@ function renderAdminMatches() {
             <option value="">Selecione</option>
             <option value="${escapeHtml(match.player1_id)}" ${p1Win ? 'selected' : ''}>${escapeHtml(match.player1_name)}</option>
             <option value="${escapeHtml(match.player2_id)}" ${p2Win ? 'selected' : ''}>${escapeHtml(match.player2_name)}</option>
-            <option value="__double_loss__" ${doubleLoss ? 'selected' : ''}>Derrota para ambos (0 x 0)</option>
+            ${isKnockout ? '' : `<option value="__double_loss__" ${doubleLoss ? 'selected' : ''}>Derrota para ambos (0 x 0)</option>`}
           </select>
         </label>
         <label>Bolas ${escapeHtml(match.player1_name)}
@@ -627,6 +790,8 @@ function setupEvents() {
       body: JSON.stringify({
         division_count: Number(document.getElementById('division-count').value || 2),
         duration_minutes: Number(document.getElementById('duration-minutes').value || 30),
+        show_bracket_scoreboard: document.getElementById('show-bracket-scoreboard').checked,
+        show_bracket_tv: document.getElementById('show-bracket-tv').checked,
         rules: collectRules('current-rules-fields'),
       })
     });
@@ -641,6 +806,8 @@ function setupEvents() {
       method: 'POST',
       body: JSON.stringify({
         table_seconds: Number(document.getElementById('tv-table-seconds').value || 60),
+        bracket_seconds: Number(document.getElementById('tv-bracket-seconds').value || 60),
+        bracket_game_filter: document.getElementById('tv-bracket-game-filter').value,
         sponsor_seconds: Number(document.getElementById('tv-sponsor-seconds').value || 30),
         match_seconds: Number(document.getElementById('tv-match-seconds').value || 5),
         filters: {
@@ -661,6 +828,26 @@ function setupEvents() {
 
   document.getElementById('player-division').addEventListener('change', ev => fillChaveSelect(document.getElementById('player-chave'), Number(ev.target.value || 1)));
   document.getElementById('round-division').addEventListener('change', ev => fillChaveSelect(document.getElementById('round-chave'), Number(ev.target.value || 1)));
+
+  document.getElementById('knockout-round-form').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    try {
+      const data = await adminFetch('/admin/knockout-rounds', {
+        method: 'POST',
+        body: JSON.stringify({
+          division: Number(document.getElementById('knockout-division').value || 1),
+          name: document.getElementById('knockout-name').value,
+          date: document.getElementById('knockout-date').value,
+          start_time: document.getElementById('knockout-start-time').value || '09:00',
+        }),
+      });
+      adminState = data.state || await adminFetch('/admin/state');
+      preserveScroll(renderAll);
+      toast(`${data.created || 0} confronto(s) do chaveamento criado(s).`);
+    } catch (err) {
+      toast(err.message);
+    }
+  });
 
   document.getElementById('player-form').addEventListener('submit', async ev => {
     ev.preventDefault();
@@ -685,11 +872,11 @@ function setupEvents() {
     try { prepareManualRound(); } catch (err) { toast(err.message); }
   });
 
-  ['admin-filter-date','admin-filter-round','admin-filter-place','admin-filter-player','admin-filter-division','admin-filter-chave','admin-filter-status'].forEach(id => {
+  ADMIN_MATCH_FILTER_IDS.forEach(id => {
     document.getElementById(id).addEventListener('change', renderAdminMatches);
   });
   document.getElementById('admin-clear-filters').addEventListener('click', () => {
-    ['admin-filter-date','admin-filter-round','admin-filter-place','admin-filter-player','admin-filter-division','admin-filter-chave','admin-filter-status'].forEach(id => document.getElementById(id).value = '');
+    ADMIN_MATCH_FILTER_IDS.forEach(id => document.getElementById(id).value = '');
     renderAdminMatches();
   });
   const adminPrintButton = document.getElementById('admin-print-filtered-matches');

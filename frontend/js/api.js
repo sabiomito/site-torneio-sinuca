@@ -141,6 +141,20 @@ function statusText(rankStatus) {
   return '';
 }
 
+function matchStageLabel(match) {
+  if (match?.phase === 'knockout') {
+    return match.stage_name || (match.bracket_match_kind === 'third_place' ? 'Disputa de 3º lugar' : 'Chaveamento');
+  }
+  return `Chave ${normalizeChaveLabel(match?.chave)} · Rodada ${match?.round_number || '-'}`;
+}
+
+function roundStageLabel(round) {
+  if (round?.phase === 'knockout') {
+    return round.stage_name || 'Chaveamento';
+  }
+  return `Chave ${normalizeChaveLabel(round?.chave)} · Rodada ${round?.round_number || '-'}`;
+}
+
 function abbreviateName(name, maxLen = 22) {
   const cleaned = String(name || '').replace(/\s+/g, ' ').trim();
   if (cleaned.length <= maxLen) return cleaned;
@@ -180,7 +194,7 @@ function printableMatchRow(match) {
     ? `${match.balls_p1 || 0} x ${match.balls_p2 || 0}${match.double_loss ? ' (derrota para ambos)' : ''}`
     : '';
   const blank = '<span class="blank-score"></span> x <span class="blank-score"></span>';
-  const roundText = `${divisionName(match.division)}${match.chave ? ` / Chave ${escapeHtml(normalizeChaveLabel(match.chave))}` : ''}${match.round_number ? ` / Rodada ${escapeHtml(match.round_number)}` : ''}`;
+  const roundText = `${divisionName(match.division)} / ${escapeHtml(matchStageLabel(match))}`;
   return `<tr>
     <td class="col-date">${escapeHtml(fmtDate(match.date))}</td>
     <td class="col-time">${escapeHtml(match.time || '')}</td>
@@ -302,7 +316,7 @@ function renderMatches(container, matches) {
       const rows = byPlace[place].sort((a,b) => String(a.time).localeCompare(String(b.time))).map(match => `
         <div class="match-row ${match.is_finished ? 'finished' : ''}">
           <div class="match-main">
-            <span class="pill">${divisionName(match.division)} · Chave ${escapeHtml(normalizeChaveLabel(match.chave))} · Rodada ${escapeHtml(match.round_number || '-')}</span>
+            <span class="pill">${divisionName(match.division)} · ${escapeHtml(matchStageLabel(match))}</span>
             <span class="time">${escapeHtml(match.time || '--:--')}</span>
             <strong>${playerLinkHtml(match.player1_id, match.player1_name)}</strong>
             <span class="versus">x</span>

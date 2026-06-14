@@ -1,5 +1,7 @@
 let state = null;
 let matchesRequestId = 0;
+const standingsViewByDivision = {};
+const bracketGameFilterByDivision = {};
 
 function normalizeChave(value) {
   return String(value || 'A').trim().toUpperCase() || 'A';
@@ -167,13 +169,25 @@ function renderStandings() {
     const chaves = state.standings[String(d)] || {};
     const chaveNames = Object.keys(chaves).sort();
     const divisionPlayers = chaveNames.reduce((total, chave) => total + (chaves[chave] || []).length, 0);
+    const bracket = state.config.show_bracket_scoreboard !== false ? state.brackets?.[String(d)] : null;
+    const currentView = bracket
+      ? (standingsViewByDivision[d] || (bracket.group_phase_complete ? 'bracket' : 'table'))
+      : 'table';
+    standingsViewByDivision[d] = currentView;
     html += `<section class="card standings-card">
       <div class="section-title">
         <h2>${divisionName(d)}</h2>
-        <span>${divisionPlayers} jogadores</span>
-      </div>`;
+        <div class="table-actions">
+          <span>${divisionPlayers} jogadores</span>
+          ${bracket ? `<div class="standings-view-toggle" data-view-toggle="${d}">
+            <button type="button" data-standings-view="table" class="${currentView === 'table' ? 'active' : ''}">Tabela</button>
+            <button type="button" data-standings-view="bracket" class="${currentView === 'bracket' ? 'active' : ''}">Chave</button>
+          </div>` : ''}
+        </div>
+      </div>
+      <div class="standings-table-view ${currentView === 'table' ? '' : 'hidden'}" data-division-table="${d}">`;
     if (!chaveNames.length) {
-      html += '<p class="muted">Nenhum jogador cadastrado nesta divisão.</p></section>';
+      html += '<p class="muted">Nenhum jogador cadastrado nesta divisão.</p></div></section>';
       continue;
     }
     const showChaveInShare = chaveNames.length > 1;
@@ -190,9 +204,30 @@ function renderStandings() {
         ${renderStandingsTable(rows)}
       </div>`;
     });
-    html += '</section>';
+    html += `</div>
+      ${bracket ? `<div class="standings-bracket-view ${currentView === 'bracket' ? '' : 'hidden'}" data-division-bracket="${d}">
+        ${renderKnockoutBracket(bracket, {
+          showFilter: true,
+          filterMode: bracketGameFilterByDivision[d] || 'all',
+        })}
+      </div>` : ''}
+    </section>`;
   }
   standingsEl.innerHTML = html;
+  standingsEl.querySelectorAll('[data-view-toggle]').forEach(toggle => {
+    toggle.querySelectorAll('[data-standings-view]').forEach(button => {
+      button.addEventListener('click', () => {
+        const division = Number(toggle.dataset.viewToggle || 1);
+        const view = button.dataset.standingsView;
+        standingsViewByDivision[division] = view;
+        const card = toggle.closest('.standings-card');
+        card.querySelector(`[data-division-table="${division}"]`)?.classList.toggle('hidden', view !== 'table');
+        card.querySelector(`[data-division-bracket="${division}"]`)?.classList.toggle('hidden', view !== 'bracket');
+        toggle.querySelectorAll('[data-standings-view]').forEach(item => item.classList.toggle('active', item === button));
+        if (view === 'bracket') refreshKnockoutConnections(card);
+      });
+    });
+  });
   standingsEl.querySelectorAll('[data-share-division]').forEach(btn => {
     btn.addEventListener('click', async () => {
       const division = Number(btn.dataset.shareDivision || 1);
@@ -205,6 +240,15 @@ function renderStandings() {
       }
     });
   });
+  standingsEl.querySelectorAll('[data-bracket-filter-mode]').forEach(button => {
+    button.addEventListener('click', () => {
+      const root = button.closest('[data-knockout-root]');
+      const division = Number(root?.dataset.division || 1);
+      bracketGameFilterByDivision[division] = button.dataset.bracketFilterMode || 'all';
+      renderStandings();
+    });
+  });
+  refreshKnockoutConnections(standingsEl);
 }
 
 

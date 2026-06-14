@@ -228,6 +228,14 @@ def normalize_int(value, default=0, min_value=None, max_value=None):
     return result
 
 
+def normalize_bool(value, default=False):
+    if value is None:
+        return bool(default)
+    if isinstance(value, str):
+        return value.strip().lower() not in {"", "0", "false", "no", "off"}
+    return bool(value)
+
+
 def normalize_date(value):
     try:
         datetime.strptime(str(value), "%Y-%m-%d")
@@ -270,7 +278,7 @@ def available_chaves_for_division(config, division):
 TV_FILTER_KEYS = ("date", "round", "place", "player", "division", "chave", "status")
 
 
-def normalize_tv_config(raw=None):
+def normalize_tv_config(raw=None, bracket_game_filter_fallback="all"):
     raw = raw or {}
     filters_in = raw.get("filters") or {}
     filters = {
@@ -279,8 +287,15 @@ def normalize_tv_config(raw=None):
     }
     if filters["status"] not in {"finished", "pending"}:
         filters["status"] = ""
+    bracket_game_filter = str(
+        raw.get("bracket_game_filter") or bracket_game_filter_fallback or "all"
+    ).strip().lower()
+    if bracket_game_filter not in {"all", "pending"}:
+        bracket_game_filter = "all"
     return {
         "table_seconds": normalize_int(raw.get("table_seconds"), 60, 1, 3600),
+        "bracket_seconds": normalize_int(raw.get("bracket_seconds"), 60, 1, 3600),
+        "bracket_game_filter": bracket_game_filter,
         "sponsor_seconds": normalize_int(raw.get("sponsor_seconds"), 30, 1, 3600),
         "match_seconds": normalize_int(raw.get("match_seconds"), 5, 1, 3600),
         "filters": filters,
@@ -410,12 +425,16 @@ def get_config():
                 "1": {"key_count": 1, "promotion_count": 0, "relegation_count": 0},
                 "2": {"key_count": 1, "promotion_count": 0, "relegation_count": 0},
             },
+            "show_bracket_scoreboard": True,
+            "show_bracket_tv": True,
             "tv_config": normalize_tv_config(),
             "created_at": now_iso(),
         }
         put_item(item)
     item["division_count"] = normalize_int(item.get("division_count"), 2, 1, 20)
     item["duration_minutes"] = normalize_int(item.get("duration_minutes"), 30, 5, 240)
+    item["show_bracket_scoreboard"] = normalize_bool(item.get("show_bracket_scoreboard"), True)
+    item["show_bracket_tv"] = normalize_bool(item.get("show_bracket_tv"), True)
     item.setdefault("rules", {})
     for d in range(1, item["division_count"] + 1):
         raw = item["rules"].get(str(d), {}) or {}
@@ -424,7 +443,11 @@ def get_config():
             "promotion_count": normalize_int(raw.get("promotion_count", 0), 0, 0, 100),
             "relegation_count": normalize_int(raw.get("relegation_count", 0), 0, 0, 100),
         }
-    item["tv_config"] = normalize_tv_config(item.get("tv_config"))
+    item["tv_config"] = normalize_tv_config(
+        item.get("tv_config"),
+        item.get("tv_bracket_game_filter", "all"),
+    )
+    item["tv_bracket_game_filter"] = item["tv_config"]["bracket_game_filter"]
     return item
 
 
@@ -448,6 +471,18 @@ def save_config(data):
         "type": "CONFIG",
         "division_count": division_count,
         "duration_minutes": duration_minutes,
+        "show_bracket_scoreboard": normalize_bool(
+            data.get("show_bracket_scoreboard"),
+            current.get("show_bracket_scoreboard", True),
+        ),
+        "show_bracket_tv": normalize_bool(
+            data.get("show_bracket_tv"),
+            current.get("show_bracket_tv", True),
+        ),
+        "tv_bracket_game_filter": current.get("tv_config", {}).get(
+            "bracket_game_filter",
+            current.get("tv_bracket_game_filter", "all"),
+        ),
         "rules": rules,
     })
     put_item(current)
@@ -456,7 +491,11 @@ def save_config(data):
 
 def save_tv_config(data):
     current = get_config()
-    current["tv_config"] = normalize_tv_config(data)
+    current["tv_config"] = normalize_tv_config(
+        data,
+        current.get("tv_bracket_game_filter", "all"),
+    )
+    current["tv_bracket_game_filter"] = current["tv_config"]["bracket_game_filter"]
     put_item(current)
     return current["tv_config"]
 
@@ -742,6 +781,9 @@ def delete_player(player_id):
     player_id = str(player_id or "")
     if not player_id:
         return
+    for bracket in get_brackets():
+        if any(str(item.get("player_id") or "") == player_id for item in bracket.get("qualifiers", [])):
+            raise ValueError("Este jogador já faz parte de um chaveamento criado e não pode ser excluído.")
     current = get_item("PLAYER", player_id)
     if current:
         delete_media_url(current.get("photo_url", ""))
@@ -1005,6 +1047,55 @@ def delete_round(round_id):
     round_id = str(round_id or "")
     if not round_id:
         return {"deleted_pending_matches": 0, "preserved_finished_matches": 0}
+    round_item = get_item("ROUND", round_id)
+    if round_item and round_item.get("phase") == "knockout":
+        bracket = get_bracket(round_item.get("division"))
+        round_matches = [
+            match for match in get_matches()
+            if str(match.get("round_id") or "") == round_id
+        ]
+        descendant_ids = set()
+        for match in round_matches:
+            if bracket:
+                descendant_ids.update(knockout_descendant_node_ids(match, bracket))
+
+        related_matches = [
+            match for match in get_matches()
+            if match.get("phase") == "knockout"
+            and match.get("bracket_id") == round_item.get("bracket_id")
+            and (
+                normalize_int(round_item.get("bracket_round"), 0) == 1
+                or
+                str(match.get("round_id") or "") == round_id
+                or match.get("bracket_node_id") in descendant_ids
+            )
+        ]
+        affected_round_ids = {str(match.get("round_id") or "") for match in related_matches}
+        for match in related_matches:
+            if match.get("pair_key"):
+                delete_item("RESULT", str(match["pair_key"]))
+            delete_item("MATCH", match["sk"])
+        for affected_round_id in affected_round_ids:
+            if affected_round_id:
+                delete_item("ROUND", affected_round_id)
+
+        remaining = [
+            match for match in get_matches()
+            if match.get("phase") == "knockout"
+            and match.get("bracket_id") == round_item.get("bracket_id")
+        ]
+        bracket_unfrozen = False
+        if not remaining and bracket:
+            delete_item("BRACKET", bracket["sk"])
+            bracket_unfrozen = True
+        return {
+            "deleted_knockout_matches": len(related_matches),
+            "deleted_pending_matches": len([match for match in related_matches if not match.get("is_finished")]),
+            "deleted_finished_matches": len([match for match in related_matches if match.get("is_finished")]),
+            "preserved_finished_matches": 0,
+            "bracket_unfrozen": bracket_unfrozen,
+        }
+
     delete_item("ROUND", round_id)
     deleted = 0
     preserved = 0
@@ -1028,6 +1119,8 @@ def set_match_result(data):
         raise ValueError("Partida não encontrada.")
     pair_key = str(match.get("pair_key") or build_pair_key(match.get("division"), match.get("chave"), match.get("player1_id"), match.get("player2_id")))
     if data.get("clear"):
+        if match.get("phase") == "knockout" and match.get("is_finished"):
+            invalidate_pending_knockout_descendants(match)
         match["winner_id"] = ""
         match["balls_p1"] = 0
         match["balls_p2"] = 0
@@ -1039,6 +1132,8 @@ def set_match_result(data):
         delete_item("RESULT", pair_key)
         return match
     double_loss = bool(data.get("double_loss"))
+    if match.get("phase") == "knockout" and double_loss:
+        raise ValueError("No chaveamento é necessário selecionar um vencedor.")
     winner_id = "" if double_loss else str(data.get("winner_id", ""))
     if not double_loss and winner_id not in [match.get("player1_id"), match.get("player2_id")]:
         raise ValueError("Selecione o vencedor ou marque derrota para ambos.")
@@ -1048,6 +1143,13 @@ def set_match_result(data):
         balls_p1 = 7
     if not double_loss and winner_id == match.get("player2_id"):
         balls_p2 = 7
+    if (
+        match.get("phase") == "knockout"
+        and match.get("is_finished")
+        and match.get("winner_id")
+        and match.get("winner_id") != winner_id
+    ):
+        invalidate_pending_knockout_descendants(match)
     saved_at = now_iso()
     match["winner_id"] = winner_id
     match["balls_p1"] = balls_p1
@@ -1073,6 +1175,11 @@ def set_match_result(data):
         "balls_p2": balls_p2,
         "is_finished": True,
         "double_loss": double_loss,
+        "phase": match.get("phase", "group"),
+        "bracket_id": match.get("bracket_id", ""),
+        "bracket_node_id": match.get("bracket_node_id", ""),
+        "bracket_round": match.get("bracket_round", 0),
+        "bracket_match_kind": match.get("bracket_match_kind", ""),
         "created_at": saved_at,
         "result_saved_at": saved_at,
     })
@@ -1104,10 +1211,10 @@ def calculate_standings(players, matches, results, config):
 
     result_by_pair = {}
     for r in results:
-        if r.get("pair_key"):
+        if r.get("pair_key") and r.get("phase") != "knockout":
             result_by_pair[str(r.get("pair_key"))] = r
     for m in matches:
-        if m.get("is_finished") and m.get("pair_key"):
+        if m.get("is_finished") and m.get("pair_key") and m.get("phase") != "knockout":
             result_by_pair[str(m.get("pair_key"))] = m
 
     for item in result_by_pair.values():
@@ -1147,6 +1254,8 @@ def calculate_standings(players, matches, results, config):
         relegation_count = normalize_int(rule.get("relegation_count", 0), 0, 0, 100)
         for chave, rows in chaves.items():
             rows.sort(key=lambda r: (-r["points"], -r["balls_balance"], -r["balls_for"], -r["wins"], r["name"].lower()))
+            for index, row in enumerate(rows):
+                row["group_rank"] = index + 1
             for row in rows[:promotion_count]:
                 row["rank_status"] = "promotion"
             if relegation_count:
@@ -1154,6 +1263,560 @@ def calculate_standings(players, matches, results, config):
                     if row["rank_status"] != "promotion":
                         row["rank_status"] = "relegation"
     return grouped
+
+
+def get_brackets():
+    if _table is None:
+        return []
+    brackets = scan_type("BRACKET")
+    return sorted(brackets, key=lambda item: normalize_int(item.get("division"), 1))
+
+
+def get_bracket(division):
+    return get_item("BRACKET", f"DIVISION#{normalize_int(division, 1)}")
+
+
+def next_power_of_two(value):
+    size = 1
+    while size < max(2, normalize_int(value, 2)):
+        size *= 2
+    return size
+
+
+def division_group_phase_complete(division, players, matches, results, config):
+    division = normalize_int(division, 1)
+    grouped = group_players(players)
+    finished_pairs = set()
+    for item in list(results) + list(matches):
+        if item.get("phase") == "knockout" or not item.get("is_finished"):
+            continue
+        if item.get("pair_key"):
+            finished_pairs.add(str(item["pair_key"]))
+
+    has_players = False
+    for chave in available_chaves_for_division(config, division):
+        group = grouped.get((division, chave), [])
+        if group:
+            has_players = True
+        required = all_pair_keys_for_group(group, division, chave)
+        if not required.issubset(finished_pairs):
+            return False
+    return has_players
+
+
+def qualifier_sort_key(row):
+    return (
+        normalize_int(row.get("group_rank"), 999),
+        -normalize_int(row.get("points"), 0),
+        -normalize_int(row.get("balls_balance"), 0),
+        -normalize_int(row.get("balls_for"), 0),
+        -normalize_int(row.get("wins"), 0),
+        normalize_chave(row.get("chave")),
+        str(row.get("name", "")).lower(),
+    )
+
+
+def division_qualifiers(division, standings):
+    qualifiers = []
+    chaves = (standings or {}).get(str(normalize_int(division, 1)), {}) or {}
+    for chave in sorted(chaves):
+        for index, row in enumerate(chaves[chave]):
+            if row.get("rank_status") != "promotion":
+                continue
+            item = dict(row)
+            item["chave"] = normalize_chave(chave)
+            item["group_rank"] = normalize_int(item.get("group_rank"), index + 1, 1)
+            qualifiers.append(item)
+    qualifiers.sort(key=qualifier_sort_key)
+    for seed, item in enumerate(qualifiers, start=1):
+        item["seed"] = seed
+    return qualifiers
+
+
+def pair_qualifiers_cross_group(qualifiers):
+    remaining = list(qualifiers)
+    pairs = []
+    while len(remaining) >= 2:
+        strongest = remaining.pop(0)
+        opponent_index = len(remaining) - 1
+        for index in range(len(remaining) - 1, -1, -1):
+            if normalize_chave(remaining[index].get("chave")) != normalize_chave(strongest.get("chave")):
+                opponent_index = index
+                break
+        weakest = remaining.pop(opponent_index)
+        pairs.append((strongest, weakest))
+    return pairs
+
+
+def bracket_slots_for_qualifiers(qualifiers):
+    bracket_size = next_power_of_two(len(qualifiers))
+    first_round_nodes = bracket_size // 2
+    bye_count = bracket_size - len(qualifiers)
+    byes = list(qualifiers[:bye_count])
+    playing = list(qualifiers[bye_count:])
+    pairs = pair_qualifiers_cross_group(playing)
+    entries = []
+
+    for first, second in pairs:
+        if byes:
+            bye = byes.pop(0)
+            entries.append([bye["player_id"], ""])
+        entries.append([first["player_id"], second["player_id"]])
+    while byes:
+        bye = byes.pop(0)
+        entries.append([bye["player_id"], ""])
+
+    entries = entries[:first_round_nodes]
+    while len(entries) < first_round_nodes:
+        entries.append(["", ""])
+    return bracket_size, [player_id for entry in entries for player_id in entry]
+
+
+def build_bracket_spec(division, standings):
+    qualifiers = division_qualifiers(division, standings)
+    if len(qualifiers) < 2:
+        raise ValueError("Essa divisão precisa ter pelo menos 2 classificados em verde para criar o chaveamento.")
+    bracket_size, slots = bracket_slots_for_qualifiers(qualifiers)
+    bracket_id = f"bracket_division_{normalize_int(division, 1)}"
+    return {
+        "pk": "BRACKET",
+        "sk": f"DIVISION#{normalize_int(division, 1)}",
+        "type": "BRACKET",
+        "bracket_id": bracket_id,
+        "division": normalize_int(division, 1),
+        "participant_count": len(qualifiers),
+        "bracket_size": bracket_size,
+        "qualifiers": [{
+            "player_id": item.get("player_id"),
+            "name": item.get("name", ""),
+            "photo_url": item.get("photo_url", ""),
+            "profile_url": item.get("profile_url", ""),
+            "chave": item.get("chave", "A"),
+            "group_rank": item.get("group_rank", 0),
+            "seed": item.get("seed", 0),
+        } for item in qualifiers],
+        "slots": slots,
+        "created_at": now_iso(),
+    }
+
+
+def bracket_stage_name(round_number, total_rounds):
+    distance = total_rounds - round_number
+    if distance == 0:
+        return "Final"
+    if distance == 1:
+        return "Semifinal"
+    if distance == 2:
+        return "Quartas de final"
+    if distance == 3:
+        return "Oitavas de final"
+    return f"{round_number}ª fase"
+
+
+def bracket_player_map(bracket, players):
+    player_map = {str(player.get("player_id")): clean_public_player(player) for player in players}
+    for qualifier in bracket.get("qualifiers", []):
+        player_id = str(qualifier.get("player_id") or "")
+        if player_id and player_id not in player_map:
+            player_map[player_id] = clean_public_player(qualifier)
+    return player_map
+
+
+def build_bracket_view(bracket, players, matches, group_phase_complete=True, is_preview=False):
+    bracket_size = next_power_of_two(bracket.get("bracket_size") or len(bracket.get("slots", [])))
+    total_rounds = max(1, bracket_size.bit_length() - 1)
+    bracket_id = str(bracket.get("bracket_id") or "")
+    player_map = bracket_player_map(bracket, players)
+    match_map = {
+        str(match.get("bracket_node_id")): match
+        for match in matches
+        if match.get("phase") == "knockout"
+        and str(match.get("bracket_id") or "") == bracket_id
+        and match.get("bracket_node_id")
+    }
+    slots = [str(value or "") for value in bracket.get("slots", [])]
+    slots.extend([""] * max(0, bracket_size - len(slots)))
+    resolved_nodes = {}
+    rounds = []
+
+    for round_number in range(1, total_rounds + 1):
+        node_count = bracket_size // (2 ** round_number)
+        round_nodes = []
+        for node_index in range(node_count):
+            node_id = f"R{round_number}M{node_index}"
+            if round_number == 1:
+                side_states = []
+                for slot_index in (node_index * 2, node_index * 2 + 1):
+                    player_id = slots[slot_index] if slot_index < len(slots) else ""
+                    side_states.append(("resolved", player_id) if player_id else ("empty", ""))
+            else:
+                first_source = resolved_nodes[f"R{round_number - 1}M{node_index * 2}"]
+                second_source = resolved_nodes[f"R{round_number - 1}M{node_index * 2 + 1}"]
+                side_states = [
+                    (first_source["outcome_status"], first_source["outcome_player_id"]),
+                    (second_source["outcome_status"], second_source["outcome_player_id"]),
+                ]
+
+            player_ids = [
+                player_id if status == "resolved" else ""
+                for status, player_id in side_states
+            ]
+            match = match_map.get(node_id)
+            if match and match.get("is_finished") and match.get("winner_id"):
+                outcome_status = "resolved"
+                outcome_player_id = str(match.get("winner_id"))
+                node_status = "finished"
+            elif side_states[0][0] == "resolved" and side_states[1][0] == "empty":
+                outcome_status = "resolved"
+                outcome_player_id = player_ids[0]
+                node_status = "bye"
+            elif side_states[1][0] == "resolved" and side_states[0][0] == "empty":
+                outcome_status = "resolved"
+                outcome_player_id = player_ids[1]
+                node_status = "bye"
+            elif side_states[0][0] == "empty" and side_states[1][0] == "empty":
+                outcome_status = "empty"
+                outcome_player_id = ""
+                node_status = "empty"
+            else:
+                outcome_status = "pending"
+                outcome_player_id = ""
+                node_status = "pending"
+
+            participants = []
+            for side, player_id in enumerate(player_ids, start=1):
+                slot_state = "unknown"
+                if player_id:
+                    if node_status == "finished":
+                        slot_state = "winner" if player_id == outcome_player_id else "loser"
+                    elif node_status == "bye":
+                        slot_state = "winner"
+                    else:
+                        slot_state = "pending"
+                participants.append({
+                    "side": side,
+                    "player": player_map.get(player_id) if player_id else None,
+                    "state": slot_state,
+                })
+
+            node = {
+                "node_id": node_id,
+                "round_number": round_number,
+                "node_index": node_index,
+                "status": node_status,
+                "player1": participants[0],
+                "player2": participants[1],
+                "match": match,
+                "outcome_status": outcome_status,
+                "outcome_player_id": outcome_player_id,
+            }
+            resolved_nodes[node_id] = node
+            round_nodes.append(node)
+        rounds.append({
+            "round_number": round_number,
+            "name": bracket_stage_name(round_number, total_rounds),
+            "nodes": round_nodes,
+        })
+
+    final_node = resolved_nodes.get(f"R{total_rounds}M0", {})
+    final_match = final_node.get("match") or {}
+    champion_id = str(final_match.get("winner_id") or "") if final_match.get("is_finished") else ""
+    finalist_ids = [
+        ((final_node.get("player1") or {}).get("player") or {}).get("player_id", ""),
+        ((final_node.get("player2") or {}).get("player") or {}).get("player_id", ""),
+    ]
+    runner_up_id = next((player_id for player_id in finalist_ids if player_id and player_id != champion_id), "")
+
+    semifinal_losers = []
+    if total_rounds >= 2:
+        semifinal_round = total_rounds - 1
+        for node_index in range(2):
+            semifinal = resolved_nodes.get(f"R{semifinal_round}M{node_index}", {})
+            semifinal_match = semifinal.get("match") or {}
+            if not semifinal_match.get("is_finished"):
+                continue
+            participant_ids = [
+                str(semifinal_match.get("player1_id") or ""),
+                str(semifinal_match.get("player2_id") or ""),
+            ]
+            loser_id = next(
+                (player_id for player_id in participant_ids if player_id and player_id != semifinal_match.get("winner_id")),
+                "",
+            )
+            if loser_id:
+                semifinal_losers.append(loser_id)
+
+    third_match = match_map.get("THIRD")
+    third_place_id = ""
+    if third_match and third_match.get("is_finished"):
+        third_place_id = str(third_match.get("winner_id") or "")
+    elif len(semifinal_losers) == 1:
+        third_place_id = semifinal_losers[0]
+
+    third_place = {
+        "node_id": "THIRD",
+        "name": "Disputa de 3º lugar",
+        "player1": player_map.get(semifinal_losers[0]) if len(semifinal_losers) >= 1 else None,
+        "player2": player_map.get(semifinal_losers[1]) if len(semifinal_losers) >= 2 else None,
+        "match": third_match,
+    } if total_rounds >= 2 else None
+
+    created_matches = [match for match in match_map.values()]
+    return {
+        "bracket_id": bracket_id,
+        "division": normalize_int(bracket.get("division"), 1),
+        "participant_count": normalize_int(bracket.get("participant_count"), len(bracket.get("qualifiers", []))),
+        "bracket_size": bracket_size,
+        "total_rounds": total_rounds,
+        "qualifiers": bracket.get("qualifiers", []),
+        "rounds": rounds,
+        "third_place": third_place,
+        "podium": {
+            "champion": player_map.get(champion_id) if champion_id else None,
+            "runner_up": player_map.get(runner_up_id) if runner_up_id else None,
+            "third_place": player_map.get(third_place_id) if third_place_id else None,
+        },
+        "group_phase_complete": bool(group_phase_complete),
+        "is_preview": bool(is_preview),
+        "started": bool(created_matches),
+        "finished": bool(champion_id and (third_place_id or total_rounds == 1)),
+    }
+
+
+def build_public_brackets(config, players, matches, results, standings):
+    persisted = {
+        normalize_int(item.get("division"), 1): item
+        for item in get_brackets()
+    }
+    views = {}
+    for division in range(1, config["division_count"] + 1):
+        complete = division_group_phase_complete(division, players, matches, results, config)
+        bracket = persisted.get(division)
+        is_preview = False
+        if not bracket:
+            try:
+                bracket = build_bracket_spec(division, standings)
+                is_preview = True
+            except ValueError:
+                bracket = None
+        if bracket:
+            views[str(division)] = build_bracket_view(
+                bracket,
+                players,
+                matches,
+                group_phase_complete=complete,
+                is_preview=is_preview,
+            )
+    return views
+
+
+def build_knockout_match(round_item, bracket, node_id, player1, player2, order_index, kind="main"):
+    config = get_config()
+    duration = config["duration_minutes"]
+    start_min = time_to_minutes(round_item["start_time"]) + (order_index * duration)
+    time_str = minutes_to_time(start_min)
+    end_time = minutes_to_time(start_min + duration)
+    match_id = make_id("match")
+    return {
+        "pk": "MATCH",
+        "sk": match_id,
+        "type": "MATCH",
+        "match_id": match_id,
+        "pair_key": f"KNOCKOUT#{bracket['bracket_id']}#{node_id}",
+        "round_id": round_item["round_id"],
+        "round_name": round_item["name"],
+        "round_number": round_item["round_number"],
+        "stage_name": round_item["stage_name"],
+        "division": bracket["division"],
+        "chave": "CHAVEAMENTO",
+        "phase": "knockout",
+        "bracket_id": bracket["bracket_id"],
+        "bracket_node_id": node_id,
+        "bracket_round": round_item["bracket_round"],
+        "bracket_match_kind": kind,
+        "date": round_item["date"],
+        "time": time_str,
+        "end_time": end_time,
+        "duration_minutes": duration,
+        "place_id": round_item["place_id"],
+        "place_name": round_item["place_name"],
+        "player1_id": player1["player_id"],
+        "player1_name": player1["name"],
+        "player2_id": player2["player_id"],
+        "player2_name": player2["name"],
+        "winner_id": "",
+        "balls_p1": 0,
+        "balls_p2": 0,
+        "is_finished": False,
+        "double_loss": False,
+        "created_at": now_iso(),
+    }
+
+
+def create_knockout_rounds(data):
+    config = get_config()
+    division = normalize_int(data.get("division"), 1, 1, config["division_count"])
+    name = str(data.get("name") or "").strip()
+    date = normalize_date(str(data.get("date") or "").strip())
+    start_time = normalize_time(str(data.get("start_time") or "09:00").strip(), "09:00")
+    if not name:
+        raise ValueError("Informe o nome do bar/local.")
+    if not date:
+        raise ValueError("Informe uma data válida.")
+
+    players = get_players()
+    matches = get_matches()
+    results = get_results()
+    standings = calculate_standings(players, matches, results, config)
+    bracket = get_bracket(division)
+    if not bracket:
+        if not division_group_phase_complete(division, players, matches, results, config):
+            raise ValueError("Finalize todos os jogos da fase de pontos dessa divisão antes de criar o chaveamento.")
+        bracket = build_bracket_spec(division, standings)
+        put_item(bracket)
+
+    view = build_bracket_view(bracket, players, matches, group_phase_complete=True)
+    creatable = []
+    for round_item in view["rounds"]:
+        for node in round_item["nodes"]:
+            player1 = (node["player1"] or {}).get("player")
+            player2 = (node["player2"] or {}).get("player")
+            if player1 and player2 and not node.get("match"):
+                creatable.append({
+                    "node_id": node["node_id"],
+                    "round_number": round_item["round_number"],
+                    "stage_name": round_item["name"],
+                    "player1": player1,
+                    "player2": player2,
+                    "kind": "main",
+                })
+
+    third = view.get("third_place") or {}
+    if third.get("player1") and third.get("player2") and not third.get("match"):
+        creatable.append({
+            "node_id": "THIRD",
+            "round_number": view["total_rounds"],
+            "stage_name": "Disputa de 3º lugar",
+            "player1": third["player1"],
+            "player2": third["player2"],
+            "kind": "third_place",
+        })
+
+    if not creatable:
+        if view.get("finished"):
+            raise ValueError("O chaveamento dessa divisão já foi concluído.")
+        raise ValueError("Ainda não há novos confrontos definidos. Lance os resultados pendentes do chaveamento.")
+
+    creatable.sort(key=lambda item: (
+        item["round_number"],
+        0 if item["kind"] == "third_place" else 1,
+        item["node_id"],
+    ))
+    place_id = "round_place_" + hashlib.sha1(name.lower().encode("utf-8")).hexdigest()[:10]
+    duration = config["duration_minutes"]
+    created_rounds = []
+    created_matches = []
+    elapsed_games = 0
+
+    grouped_specs = {}
+    for spec in creatable:
+        grouped_specs.setdefault(spec["round_number"], []).append(spec)
+
+    for bracket_round in sorted(grouped_specs):
+        specs = grouped_specs[bracket_round]
+        stage_names = {spec["stage_name"] for spec in specs}
+        stage_name = (
+            "Final e disputa de 3º lugar"
+            if "Final" in stage_names and "Disputa de 3º lugar" in stage_names
+            else " / ".join(sorted(stage_names))
+        )
+        round_id = make_id("round")
+        round_start = add_minutes_to_time(start_time, elapsed_games * duration)
+        round_item = {
+            "pk": "ROUND",
+            "sk": round_id,
+            "type": "ROUND",
+            "round_id": round_id,
+            "name": name,
+            "place_id": place_id,
+            "place_name": name,
+            "division": division,
+            "chave": "CHAVEAMENTO",
+            "date": date,
+            "start_time": round_start,
+            "round_number": bracket_round,
+            "bracket_round": bracket_round,
+            "stage_name": stage_name,
+            "phase": "knockout",
+            "mode": "knockout",
+            "bracket_id": bracket["bracket_id"],
+            "created_at": now_iso(),
+        }
+        put_item(round_item)
+        created_rounds.append(round_item)
+        for local_index, spec in enumerate(specs):
+            match = build_knockout_match(
+                round_item,
+                bracket,
+                spec["node_id"],
+                spec["player1"],
+                spec["player2"],
+                local_index,
+                kind=spec["kind"],
+            )
+            put_item(match)
+            created_matches.append(match)
+        elapsed_games += len(specs)
+
+    return {
+        "bracket": bracket,
+        "rounds": created_rounds,
+        "matches": created_matches,
+        "created": len(created_matches),
+    }
+
+
+def knockout_descendant_node_ids(match, bracket):
+    node_id = str(match.get("bracket_node_id") or "")
+    if not node_id.startswith("R") or "M" not in node_id:
+        return set()
+    round_text, index_text = node_id[1:].split("M", 1)
+    round_number = normalize_int(round_text, 0)
+    node_index = normalize_int(index_text, 0)
+    total_rounds = max(1, next_power_of_two(bracket.get("bracket_size", 2)).bit_length() - 1)
+    descendants = set()
+    if round_number == total_rounds - 1:
+        descendants.add("THIRD")
+    while round_number < total_rounds:
+        round_number += 1
+        node_index //= 2
+        descendants.add(f"R{round_number}M{node_index}")
+    return descendants
+
+
+def invalidate_pending_knockout_descendants(match):
+    bracket = get_bracket(match.get("division"))
+    if not bracket:
+        return 0
+    descendant_ids = knockout_descendant_node_ids(match, bracket)
+    if not descendant_ids:
+        return 0
+    dependent = [
+        item for item in get_matches()
+        if item.get("phase") == "knockout"
+        and item.get("bracket_id") == match.get("bracket_id")
+        and item.get("bracket_node_id") in descendant_ids
+    ]
+    if any(item.get("is_finished") for item in dependent):
+        raise ValueError("Não é possível alterar este resultado porque uma fase posterior já foi finalizada.")
+    round_ids = {str(item.get("round_id") or "") for item in dependent}
+    for item in dependent:
+        delete_item("MATCH", item["sk"])
+    remaining_matches = get_matches()
+    for round_id in round_ids:
+        if round_id and not any(str(item.get("round_id") or "") == round_id for item in remaining_matches):
+            delete_item("ROUND", round_id)
+    return len(dependent)
 
 
 
@@ -1312,6 +1975,7 @@ def public_state(include_matches=True):
     dates = derive_dates(matches, rounds)
     places = derive_places(matches, rounds)
     standings = calculate_standings(players, matches, results, config)
+    brackets = build_public_brackets(config, players, matches, results, standings)
     requirements = round_requirements(config, players, rounds, matches, results)
     latest_result = latest_finished_match(matches)
     return {
@@ -1324,6 +1988,7 @@ def public_state(include_matches=True):
         "dates": dates,
         "places": places,
         "standings": standings,
+        "brackets": brackets,
         "round_requirements": requirements,
         "latest_result": latest_result if include_matches else None,
         "tv_matches": tv_cycle_matches(matches, config.get("tv_config")) if include_matches else [],
@@ -1361,6 +2026,9 @@ def handle_admin_mutation(event, action):
             return response(200, {**result, "state": public_state()})
         if action == "round-manual":
             result = create_round(data, manual=True)
+            return response(200, {**result, "state": public_state()})
+        if action == "knockout-rounds":
+            result = create_knockout_rounds(data)
             return response(200, {**result, "state": public_state()})
         if action == "delete-round":
             result = delete_round(data.get("round_id"))

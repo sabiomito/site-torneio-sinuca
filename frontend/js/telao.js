@@ -3,6 +3,8 @@ let telaoState = null;
 const TV_REFRESH_MS = 60000;
 const DEFAULT_TV_CONFIG = {
   table_seconds: 60,
+  bracket_seconds: 60,
+  bracket_game_filter: 'all',
   sponsor_seconds: 30,
   match_seconds: 5,
   filters: {},
@@ -26,6 +28,7 @@ const RADIO_STATIONS = [
 
 let currentMode = 'tables';
 let currentMatchIndex = 0;
+let currentBracketIndex = 0;
 let sponsorPass = 0;
 let activeSponsorShape = 'rect';
 let cycleTimer = null;
@@ -39,8 +42,11 @@ function normalizeChaveTv(value) {
 
 function tvConfig() {
   const saved = telaoState?.config?.tv_config || {};
+  const savedBracketFilter = saved.bracket_game_filter || telaoState?.config?.tv_bracket_game_filter;
   return {
     table_seconds: Math.max(1, Number(saved.table_seconds || DEFAULT_TV_CONFIG.table_seconds)),
+    bracket_seconds: Math.max(1, Number(saved.bracket_seconds || DEFAULT_TV_CONFIG.bracket_seconds)),
+    bracket_game_filter: savedBracketFilter === 'pending' ? 'pending' : 'all',
     sponsor_seconds: Math.max(1, Number(saved.sponsor_seconds || DEFAULT_TV_CONFIG.sponsor_seconds)),
     match_seconds: Math.max(1, Number(saved.match_seconds || DEFAULT_TV_CONFIG.match_seconds)),
     filters: saved.filters || {},
@@ -49,6 +55,13 @@ function tvConfig() {
 
 function cycleMatches() {
   return telaoState?.tv_matches || [];
+}
+
+function cycleBrackets() {
+  if (telaoState?.config?.show_bracket_tv === false) return [];
+  return Object.values(telaoState?.brackets || {})
+    .filter(Boolean)
+    .sort((first, second) => Number(first.division || 0) - Number(second.division || 0));
 }
 
 function gatherStandingsTables(state) {
@@ -140,6 +153,20 @@ function renderTables() {
   `).join('');
 }
 
+function renderBracket(bracket) {
+  currentMode = 'brackets';
+  const grid = document.getElementById('telao-grid');
+  grid.className = 'telao-grid bracket-screen';
+  grid.style.gridTemplateColumns = '1fr';
+  const headerHeight = document.querySelector('.telao-header')?.getBoundingClientRect().height || 100;
+  document.documentElement.style.setProperty('--telao-card-height', `${Math.max(320, window.innerHeight - headerHeight - 18)}px`);
+  grid.innerHTML = `<section class="card telao-bracket-card">${renderKnockoutBracket(bracket, {
+    tv: true,
+    filterMode: tvConfig().bracket_game_filter,
+  })}</section>`;
+  fitKnockoutBrackets(grid);
+}
+
 function chooseSponsorShape() {
   const preferred = sponsorPass % 2 === 0 ? 'rect' : 'square';
   const alternate = preferred === 'rect' ? 'square' : 'rect';
@@ -223,6 +250,14 @@ function renderCurrentMode() {
   if (!telaoState) return;
   if (currentMode === 'sponsors') {
     renderSponsors();
+  } else if (currentMode === 'brackets') {
+    const brackets = cycleBrackets();
+    if (brackets.length) {
+      currentBracketIndex = Math.min(currentBracketIndex, brackets.length - 1);
+      renderBracket(brackets[currentBracketIndex]);
+    } else {
+      renderTables();
+    }
   } else if (currentMode === 'matches') {
     const matches = cycleMatches();
     if (matches.length) {
@@ -241,6 +276,10 @@ function updateCountdown() {
   let label = 'Placar';
   if (currentMode === 'sponsors') {
     label = 'Patrocinadores';
+  } else if (currentMode === 'brackets') {
+    const brackets = cycleBrackets();
+    const current = brackets.length ? Math.min(currentBracketIndex + 1, brackets.length) : 0;
+    label = `Chaveamento ${current} de ${brackets.length}`;
   } else if (currentMode === 'matches') {
     const total = cycleMatches().length;
     const current = total ? Math.min(currentMatchIndex + 1, total) : 0;
@@ -269,7 +308,30 @@ function schedulePhase(seconds, callback) {
 
 function startTablesPhase() {
   renderTables();
-  schedulePhase(tvConfig().table_seconds, startSponsorsPhase);
+  schedulePhase(tvConfig().table_seconds, startBracketsPhase);
+}
+
+function startBracketsPhase() {
+  const brackets = cycleBrackets();
+  if (!brackets.length) {
+    startSponsorsPhase();
+    return;
+  }
+  currentBracketIndex = 0;
+  showCurrentBracket();
+}
+
+function showCurrentBracket() {
+  const brackets = cycleBrackets();
+  if (!brackets.length || currentBracketIndex >= brackets.length) {
+    startSponsorsPhase();
+    return;
+  }
+  renderBracket(brackets[currentBracketIndex]);
+  schedulePhase(tvConfig().bracket_seconds, () => {
+    currentBracketIndex += 1;
+    showCurrentBracket();
+  });
 }
 
 function startSponsorsPhase() {
