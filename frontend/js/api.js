@@ -138,6 +138,8 @@ function playerLinkHtml(id, name, className = 'player-link') {
 function statusText(rankStatus) {
   if (rankStatus === 'promotion') return 'Classificado';
   if (rankStatus === 'relegation') return 'Rebaixado';
+  if (rankStatus === 'disqualified') return 'Desclassificado';
+  if (rankStatus === 'banned') return 'Banido';
   return '';
 }
 

@@ -136,7 +136,11 @@ function renderStandingsTable(rows) {
       ? '<span class="badge win">Classificado</span>'
       : row.rank_status === 'relegation'
         ? '<span class="badge loss">Rebaixado</span>'
-        : '<span class="muted">—</span>';
+        : row.rank_status === 'disqualified'
+          ? '<span class="badge pending">Desclassificado</span>'
+          : row.rank_status === 'banned'
+            ? '<span class="badge pending">Banido</span>'
+            : '<span class="muted">—</span>';
     html += `<tr class="${escapeHtml(row.rank_status)}">
       <td>${idx + 1}</td>
       <td>${playerLinkHtml(row.player_id, row.name)}</td>

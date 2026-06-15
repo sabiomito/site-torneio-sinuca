@@ -67,6 +67,8 @@ function bracketMatchHtml(node, filterMode = 'all', options = {}) {
       data-bracket-node="${escapeHtml(node.node_id)}"
       data-round-number="${Number(node.round_number || 0)}"
       data-node-index="${Number(node.node_index || 0)}"
+      data-source-node-1="${escapeHtml(node.source_node_ids?.[0] || '')}"
+      data-source-node-2="${escapeHtml(node.source_node_ids?.[1] || '')}"
       data-node-status="${escapeHtml(node.status || 'pending')}">
     <div class="bracket-players">
       ${bracketPlayerHtml(node.player1, node.node_id, 1, {crown: firstCrown})}
@@ -300,11 +302,15 @@ function drawKnockoutConnections(root) {
 
   root.querySelectorAll('.bracket-match[data-round-number]').forEach(sourceNode => {
     const round = Number(sourceNode.dataset.roundNumber || 0);
-    const index = Number(sourceNode.dataset.nodeIndex || 0);
+    const sourceNodeId = sourceNode.dataset.bracketNode || '';
     const sourceJunction = junctions.get(sourceNode.dataset.bracketNode);
-    const targetNode = root.querySelector(`.bracket-match[data-round-number="${round + 1}"][data-node-index="${Math.floor(index / 2)}"]`);
+    const targetNode = [...root.querySelectorAll(`.bracket-match[data-round-number="${round + 1}"]`)]
+      .find(node => (
+        node.dataset.sourceNode1 === sourceNodeId
+        || node.dataset.sourceNode2 === sourceNodeId
+      ));
     if (!sourceJunction || !targetNode) return;
-    const targetSide = index % 2 === 0 ? 1 : 2;
+    const targetSide = targetNode.dataset.sourceNode1 === sourceNodeId ? 1 : 2;
     const targetPhoto = targetNode.querySelector(`.bracket-player[data-side="${targetSide}"] .bracket-photo`);
     if (!targetPhoto) return;
     const target = bracketPhotoPoint(targetPhoto, canvasRect, 'bottom');

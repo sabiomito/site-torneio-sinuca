@@ -114,7 +114,13 @@ function renderTelaoTable(rows) {
     ${rows.map((row, index) => {
       const status = row.rank_status === 'promotion'
         ? 'Classificado'
-        : row.rank_status === 'relegation' ? 'Rebaixado' : '—';
+        : row.rank_status === 'relegation'
+          ? 'Rebaixado'
+          : row.rank_status === 'disqualified'
+            ? '<span class="status-warning">Desclassificado</span>'
+            : row.rank_status === 'banned'
+              ? '<span class="status-warning">Banido</span>'
+              : '—';
       return `<tr class="${escapeHtml(row.rank_status || '')}">
         <td>${index + 1}</td>
         <td>${escapeHtml(row.name)}</td>

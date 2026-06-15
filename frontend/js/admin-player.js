@@ -35,6 +35,21 @@ function fillDivisions() {
   document.getElementById('edit-player-chave').value = editPlayer.chave || 'A';
 }
 
+function playerStatusLabel(status) {
+  if (status === 'disqualified') return 'Desclassificado';
+  if (status === 'banned') return 'Banido';
+  return 'Ativo';
+}
+
+function renderPlayerStatus() {
+  const status = editPlayer?.competition_status || 'active';
+  const label = document.getElementById('player-competition-status');
+  label.textContent = playerStatusLabel(status);
+  label.classList.toggle('status-warning', status !== 'active');
+  document.getElementById('disqualify-player').disabled = status === 'disqualified';
+  document.getElementById('ban-player').disabled = status === 'banned';
+}
+
 async function loadEditor() {
   const msg = document.getElementById('player-edit-message');
   if (!getToken()) {
@@ -49,6 +64,32 @@ async function loadEditor() {
     document.getElementById('edit-player-message').value = editPlayer.short_message || '';
     document.getElementById('player-photo-preview').src = editPlayer.photo_url || '/img/entre-folhas-logo-transparent.png';
     fillDivisions();
+    renderPlayerStatus();
+  } catch (err) {
+    msg.textContent = err.message;
+  }
+}
+
+async function updatePlayerStatus(status) {
+  const label = playerStatusLabel(status);
+  const confirmation = `Marcar este jogador como ${label.toLowerCase()}? Todos os jogos dele serão registrados como derrota administrativa.`;
+  if (!confirm(confirmation)) return;
+
+  const msg = document.getElementById('player-edit-message');
+  msg.textContent = 'Atualizando situação e resultados...';
+  try {
+    const data = await apiFetch('/admin/player-status', {
+      method: 'POST',
+      admin: true,
+      body: JSON.stringify({
+        player_id: getPlayerId(),
+        competition_status: status,
+      }),
+    });
+    editPlayer = data.player;
+    editState = data.state || editState;
+    renderPlayerStatus();
+    msg.textContent = `${label}. ${data.affected_matches || 0} jogo(s) atualizado(s) para derrota administrativa.`;
   } catch (err) {
     msg.textContent = err.message;
   }
@@ -67,6 +108,14 @@ document.getElementById('player-photo-file').addEventListener('change', async ev
   } catch (err) {
     document.getElementById('player-edit-message').textContent = err.message;
   }
+});
+
+document.getElementById('disqualify-player').addEventListener('click', () => {
+  updatePlayerStatus('disqualified');
+});
+
+document.getElementById('ban-player').addEventListener('click', () => {
+  updatePlayerStatus('banned');
 });
 
 document.getElementById('player-edit-form').addEventListener('submit', async ev => {

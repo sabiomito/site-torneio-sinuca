@@ -138,8 +138,10 @@ button.secondary, .button.secondary, .small-button.ghost {
   color: var(--text);
   border: 1px solid var(--line);
 }
+button.warning { background: var(--warning); color: #2b2104; }
 button.danger { background: var(--danger); color: #200909; }
 button.small { padding: 8px 11px; border-radius: 10px; font-size: .9rem; }
+button:disabled { cursor: not-allowed; opacity: .55; transform: none; }
 
 input, textarea, select {
   width: 100%;
@@ -207,6 +209,7 @@ tr.relegation td:first-child, .rank-relegation td:first-child { border-left: 4px
 .badge.done, .badge.win { background: rgba(40, 209, 124, .18); color: var(--accent); }
 .badge.danger, .badge.loss { background: rgba(255, 100, 100, .18); color: var(--danger); }
 .badge.pending { background: rgba(255, 209, 102, .15); color: var(--warning); }
+.status-warning { color: var(--warning); font-weight: 800; }
 .winner { color: var(--accent); }
 .score { font-weight: 800; }
 
@@ -215,6 +218,17 @@ tr.relegation td:first-child, .rank-relegation td:first-child { border-left: 4px
 .legend-chip.relegation { color: var(--danger); border: 1px solid rgba(255, 100, 100, .35); background: rgba(255, 100, 100, .12); }
 
 .messages { display: grid; gap: 8px; margin-bottom: 16px; }
+.player-disciplinary-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255,255,255,.025);
+}
+.player-disciplinary-actions p { margin: 4px 0 0; }
 .message, .empty {
   padding: 12px 14px;
   border-radius: 14px;
@@ -315,7 +329,7 @@ tr.relegation td:first-child, .rank-relegation td:first-child { border-left: 4px
 .footer { color: var(--muted); text-align: center; padding: 24px; border-top: 1px solid var(--line); }
 
 @media (max-width: 850px) {
-  .topbar, .hero, .section-title, .section-subtitle, .match-row, .match-card { align-items: flex-start; flex-direction: column; }
+  .topbar, .hero, .section-title, .section-subtitle, .match-row, .match-card, .player-disciplinary-actions { align-items: flex-start; flex-direction: column; }
   .grid-2, .grid-3, .grid-4, .grid-5, .inline-form, .result-form .result-grid { grid-template-columns: 1fr; }
   .match-status { text-align: left; }
   table { min-width: 640px; }

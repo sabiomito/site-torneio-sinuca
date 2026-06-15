@@ -350,16 +350,23 @@ function renderPlayersList() {
     container.innerHTML = '<div class="empty">Nenhum competidor cadastrado.</div>';
     return;
   }
-  container.innerHTML = adminState.players.map(p => `<div class="list-item">
+  container.innerHTML = adminState.players.map(p => {
+    const statusBadge = p.competition_status === 'disqualified'
+      ? '<span class="badge pending">Desclassificado</span>'
+      : p.competition_status === 'banned'
+        ? '<span class="badge pending">Banido</span>'
+        : '';
+    return `<div class="list-item">
     <div class="list-main-with-photo">
       <img class="mini-avatar" src="${escapeHtml(p.photo_url || '/img/entre-folhas-logo-transparent.png')}" alt="">
-      <div><strong>${escapeHtml(p.name)}</strong><div class="match-meta">${divisionName(p.division)} · Chave ${escapeHtml(normalizeChave(p.chave))}${p.short_message ? ` · ${escapeHtml(p.short_message)}` : ''}</div></div>
+      <div><strong>${escapeHtml(p.name)}</strong> ${statusBadge}<div class="match-meta">${divisionName(p.division)} · Chave ${escapeHtml(normalizeChave(p.chave))}${p.short_message ? ` · ${escapeHtml(p.short_message)}` : ''}</div></div>
     </div>
     <div class="list-actions">
       <a class="small-button ghost" href="/admin/jogador?id=${encodeURIComponent(p.player_id)}">Editar info</a>
       <button class="small danger" data-delete-player="${escapeHtml(p.player_id)}">Excluir</button>
     </div>
-  </div>`).join('');
+  </div>`;
+  }).join('');
   container.querySelectorAll('[data-delete-player]').forEach(btn => {
     btn.addEventListener('click', async () => {
       if (!confirm('Excluir este competidor? Partidas pendentes dele serão removidas. Resultados já salvos ficam preservados.')) return;

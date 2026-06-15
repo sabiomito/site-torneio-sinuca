@@ -34,6 +34,14 @@ _table = _dynamodb.Table(TABLE_NAME) if TABLE_NAME else None
 _s3 = _session.client("s3", **_s3_options) if MEDIA_BUCKET else None
 _reset_checked = False
 
+PLAYER_STATUS_ACTIVE = "active"
+PLAYER_STATUS_DISQUALIFIED = "disqualified"
+PLAYER_STATUS_BANNED = "banned"
+DISCIPLINARY_PLAYER_STATUSES = {
+    PLAYER_STATUS_DISQUALIFIED,
+    PLAYER_STATUS_BANNED,
+}
+
 
 def now_iso():
     return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
@@ -354,6 +362,7 @@ def clean_public_player(player):
     item["profile_url"] = player_profile_url(item)
     item.setdefault("short_message", "")
     item.setdefault("photo_url", "")
+    item["competition_status"] = normalize_player_status(item.get("competition_status"))
     return item
 
 
@@ -410,6 +419,17 @@ def save_jpeg_media(data_url, key, previous_url=""):
 def build_pair_key(division, chave, p1_id, p2_id):
     ordered = sorted([str(p1_id), str(p2_id)])
     return f"D{normalize_int(division, 1)}#K{normalize_chave(chave)}#{ordered[0]}#{ordered[1]}"
+
+
+def normalize_player_status(value):
+    status = str(value or PLAYER_STATUS_ACTIVE).strip().lower()
+    if status in DISCIPLINARY_PLAYER_STATUSES:
+        return status
+    return PLAYER_STATUS_ACTIVE
+
+
+def is_disciplinary_player_status(value):
+    return normalize_player_status(value) in DISCIPLINARY_PLAYER_STATUSES
 
 
 def get_config():
@@ -511,6 +531,7 @@ def get_players():
             chave = "A"
         p["division"] = division
         p["chave"] = chave
+        p["competition_status"] = normalize_player_status(p.get("competition_status"))
         normalized.append(p)
     return sorted(normalized, key=lambda p: (p["division"], p["chave"], str(p.get("name", "")).lower()))
 
@@ -750,6 +771,7 @@ def upsert_player(data):
         "chave": chave,
         "short_message": str(data.get("short_message", current.get("short_message", "")) or "").strip()[:160],
         "photo_url": current.get("photo_url", ""),
+        "competition_status": normalize_player_status(current.get("competition_status")),
         "created_at": current.get("created_at") or data.get("created_at") or now_iso(),
         "updated_at": now_iso(),
     }
@@ -775,6 +797,119 @@ def upsert_player(data):
             if changed:
                 put_item(m)
     return item
+
+
+def result_item_for_match(match, saved_at=None):
+    saved_at = saved_at or now_iso()
+    return {
+        "pk": "RESULT",
+        "sk": str(match.get("pair_key") or ""),
+        "type": "RESULT",
+        "pair_key": str(match.get("pair_key") or ""),
+        "division": match.get("division"),
+        "chave": match.get("chave"),
+        "player1_id": match.get("player1_id"),
+        "player1_name": match.get("player1_name"),
+        "player2_id": match.get("player2_id"),
+        "player2_name": match.get("player2_name"),
+        "winner_id": match.get("winner_id", ""),
+        "balls_p1": match.get("balls_p1", 0),
+        "balls_p2": match.get("balls_p2", 0),
+        "is_finished": True,
+        "double_loss": bool(match.get("double_loss")),
+        "administrative_loss_player_ids": list(match.get("administrative_loss_player_ids") or []),
+        "phase": match.get("phase", "group"),
+        "bracket_id": match.get("bracket_id", ""),
+        "bracket_node_id": match.get("bracket_node_id", ""),
+        "bracket_round": match.get("bracket_round", 0),
+        "bracket_match_kind": match.get("bracket_match_kind", ""),
+        "created_at": saved_at,
+        "result_saved_at": saved_at,
+    }
+
+
+def apply_disciplinary_result(match, players_by_id):
+    participant_ids = (
+        str(match.get("player1_id") or ""),
+        str(match.get("player2_id") or ""),
+    )
+    sanctioned_ids = [
+        player_id
+        for player_id in participant_ids
+        if is_disciplinary_player_status((players_by_id.get(player_id) or {}).get("competition_status"))
+    ]
+    if not sanctioned_ids:
+        return False
+
+    saved_at = now_iso()
+    match["administrative_loss_player_ids"] = sanctioned_ids
+    match["is_finished"] = True
+    match["result_saved_at"] = saved_at
+    match["updated_at"] = saved_at
+
+    if len(sanctioned_ids) == 2:
+        match["winner_id"] = ""
+        match["balls_p1"] = 0
+        match["balls_p2"] = 0
+        match["double_loss"] = True
+        return True
+
+    losing_player_id = sanctioned_ids[0]
+    match["winner_id"] = (
+        match.get("player2_id")
+        if losing_player_id == match.get("player1_id")
+        else match.get("player1_id")
+    )
+    match["balls_p1"] = 0 if losing_player_id == match.get("player1_id") else 7
+    match["balls_p2"] = 0 if losing_player_id == match.get("player2_id") else 7
+    match["double_loss"] = False
+    return True
+
+
+def persist_disciplinary_result(match):
+    put_item(match)
+    put_item(result_item_for_match(match, match.get("result_saved_at")))
+
+
+def disciplinary_players_for_match(match):
+    players_by_id = {}
+    for player_id in {str(match.get("player1_id") or ""), str(match.get("player2_id") or "")}:
+        if player_id:
+            players_by_id[player_id] = get_item("PLAYER", player_id) or {}
+    return players_by_id
+
+
+def set_player_status(data):
+    player_id = str(data.get("player_id") or "")
+    status = normalize_player_status(data.get("competition_status"))
+    if not player_id:
+        raise ValueError("Jogador não informado.")
+    if status not in DISCIPLINARY_PLAYER_STATUSES:
+        raise ValueError("Selecione desclassificado ou banido.")
+
+    player = get_item("PLAYER", player_id)
+    if not player:
+        raise ValueError("Jogador não encontrado.")
+    player["competition_status"] = status
+    put_item(player)
+
+    players_by_id = {player_id: player}
+    affected_matches = 0
+    for match in get_matches():
+        participant_ids = {
+            str(match.get("player1_id") or ""),
+            str(match.get("player2_id") or ""),
+        }
+        if player_id not in participant_ids:
+            continue
+        opponent_ids = participant_ids - {player_id, ""}
+        for opponent_id in opponent_ids:
+            if opponent_id not in players_by_id:
+                players_by_id[opponent_id] = get_item("PLAYER", opponent_id) or {}
+        if apply_disciplinary_result(match, players_by_id):
+            persist_disciplinary_result(match)
+            affected_matches += 1
+    return {"player": player, "affected_matches": affected_matches}
 
 
 def delete_player(player_id):
@@ -846,6 +981,10 @@ def build_match_item(round_item, p1, p2, order_index):
         item["balls_p2"] = previous_result.get("balls_p2", 0)
         item["is_finished"] = True
         item["double_loss"] = bool(previous_result.get("double_loss"))
+    apply_disciplinary_result(item, {
+        str(p1["player_id"]): p1,
+        str(p2["player_id"]): p2,
+    })
     return item
 
 
@@ -1013,6 +1152,8 @@ def create_round(data, manual=False):
     for idx, (p1, p2) in enumerate(pairs):
         match = build_match_item(round_item, p1, p2, idx)
         put_item(match)
+        if match.get("administrative_loss_player_ids"):
+            put_item(result_item_for_match(match, match.get("result_saved_at")))
         matches.append(match)
     return {"round": round_item, "matches": matches, "created": len(matches), "skipped_conflicts": skipped_conflicts, "skipped": len(skipped_conflicts)}
 
@@ -1118,6 +1259,9 @@ def set_match_result(data):
     if not match:
         raise ValueError("Partida não encontrada.")
     pair_key = str(match.get("pair_key") or build_pair_key(match.get("division"), match.get("chave"), match.get("player1_id"), match.get("player2_id")))
+    if apply_disciplinary_result(match, disciplinary_players_for_match(match)):
+        persist_disciplinary_result(match)
+        return match
     if data.get("clear"):
         if match.get("phase") == "knockout" and match.get("is_finished"):
             invalidate_pending_knockout_descendants(match)
@@ -1159,30 +1303,7 @@ def set_match_result(data):
     match["result_saved_at"] = saved_at
     match["updated_at"] = saved_at
     put_item(match)
-    put_item({
-        "pk": "RESULT",
-        "sk": pair_key,
-        "type": "RESULT",
-        "pair_key": pair_key,
-        "division": match.get("division"),
-        "chave": match.get("chave"),
-        "player1_id": match.get("player1_id"),
-        "player1_name": match.get("player1_name"),
-        "player2_id": match.get("player2_id"),
-        "player2_name": match.get("player2_name"),
-        "winner_id": winner_id,
-        "balls_p1": balls_p1,
-        "balls_p2": balls_p2,
-        "is_finished": True,
-        "double_loss": double_loss,
-        "phase": match.get("phase", "group"),
-        "bracket_id": match.get("bracket_id", ""),
-        "bracket_node_id": match.get("bracket_node_id", ""),
-        "bracket_round": match.get("bracket_round", 0),
-        "bracket_match_kind": match.get("bracket_match_kind", ""),
-        "created_at": saved_at,
-        "result_saved_at": saved_at,
-    })
+    put_item(result_item_for_match(match, saved_at))
     return match
 
 
@@ -1207,6 +1328,7 @@ def calculate_standings(players, matches, results, config):
             "balls_against": 0,
             "balls_balance": 0,
             "rank_status": "normal",
+            "competition_status": normalize_player_status(p.get("competition_status")),
         }
 
     result_by_pair = {}
@@ -1262,6 +1384,9 @@ def calculate_standings(players, matches, results, config):
                 for row in rows[-relegation_count:]:
                     if row["rank_status"] != "promotion":
                         row["rank_status"] = "relegation"
+            for row in rows:
+                if row["competition_status"] in DISCIPLINARY_PLAYER_STATUSES:
+                    row["rank_status"] = row["competition_status"]
     return grouped
 
 
@@ -1348,6 +1473,27 @@ def pair_qualifiers_cross_group(qualifiers):
     return pairs
 
 
+def qualifier_bracket_order_key(qualifier):
+    return (
+        normalize_chave(qualifier.get("chave")),
+        normalize_int(qualifier.get("group_rank"), 999, 1),
+        normalize_int(qualifier.get("seed"), 999, 1),
+        str(qualifier.get("name", "")).lower(),
+    )
+
+
+def bracket_entry_order_key(entry, chaves):
+    ranks_by_chave = {}
+    for qualifier in entry:
+        chave = normalize_chave(qualifier.get("chave"))
+        rank = normalize_int(qualifier.get("group_rank"), 999, 1)
+        ranks_by_chave[chave] = min(rank, ranks_by_chave.get(chave, rank))
+    return (
+        *(ranks_by_chave.get(chave, 999) for chave in chaves),
+        min((normalize_int(item.get("seed"), 999, 1) for item in entry), default=999),
+    )
+
+
 def bracket_slots_for_qualifiers(qualifiers):
     bracket_size = next_power_of_two(len(qualifiers))
     first_round_nodes = bracket_size // 2
@@ -1355,21 +1501,21 @@ def bracket_slots_for_qualifiers(qualifiers):
     byes = list(qualifiers[:bye_count])
     playing = list(qualifiers[bye_count:])
     pairs = pair_qualifiers_cross_group(playing)
-    entries = []
-
-    for first, second in pairs:
-        if byes:
-            bye = byes.pop(0)
-            entries.append([bye["player_id"], ""])
-        entries.append([first["player_id"], second["player_id"]])
-    while byes:
-        bye = byes.pop(0)
-        entries.append([bye["player_id"], ""])
+    chaves = sorted({normalize_chave(item.get("chave")) for item in qualifiers})
+    entries = [[bye] for bye in byes] + [list(pair) for pair in pairs]
+    for entry in entries:
+        entry.sort(key=qualifier_bracket_order_key)
+    entries.sort(key=lambda entry: bracket_entry_order_key(entry, chaves))
 
     entries = entries[:first_round_nodes]
     while len(entries) < first_round_nodes:
-        entries.append(["", ""])
-    return bracket_size, [player_id for entry in entries for player_id in entry]
+        entries.append([])
+    slots = []
+    for entry in entries:
+        player_ids = [str(item.get("player_id") or "") for item in entry[:2]]
+        player_ids.extend([""] * (2 - len(player_ids)))
+        slots.extend(player_ids)
+    return bracket_size, slots
 
 
 def build_bracket_spec(division, standings):
@@ -1413,6 +1559,87 @@ def bracket_stage_name(round_number, total_rounds):
     return f"{round_number}ª fase"
 
 
+def bracket_source_pairs(source_count):
+    source_count = normalize_int(source_count, 0, 0)
+    if source_count < 2:
+        return []
+    if source_count == 2:
+        return [(0, 1)]
+    if source_count == 4:
+        return [(0, 3), (1, 2)]
+    # Aumenta o salto com o tamanho da chave e reaplica a regra nas fases seguintes.
+    offset = (source_count // 2) - 1
+    return [
+        (source_index, (source_index + offset) % source_count)
+        for source_index in range(0, source_count, 2)
+    ]
+
+
+def standard_seed_order(size):
+    size = next_power_of_two(size)
+    order = [0, 1]
+    while len(order) < size:
+        next_size = len(order) * 2
+        order = [
+            value
+            for seed in order
+            for value in (seed, next_size - 1 - seed)
+        ]
+    return order[:size]
+
+
+def bracket_round_source_pairs(bracket, target_round_number, source_count):
+    chaves = {
+        normalize_chave(item.get("chave"))
+        for item in bracket.get("qualifiers", [])
+        if item.get("player_id")
+    }
+    if len(chaves) == 1:
+        if target_round_number == 2:
+            order = standard_seed_order(source_count)
+            return [
+                (order[index], order[index + 1])
+                for index in range(0, len(order), 2)
+            ]
+        return [
+            (source_index, source_index + 1)
+            for source_index in range(0, source_count, 2)
+        ]
+    return bracket_source_pairs(source_count)
+
+
+def bracket_next_node_index(source_count, source_index, source_pairs=None):
+    for target_index, source_pair in enumerate(source_pairs or bracket_source_pairs(source_count)):
+        if source_index in source_pair:
+            return target_index
+    return None
+
+
+def bracket_first_round_node_order(bracket):
+    bracket_size = next_power_of_two(bracket.get("bracket_size") or len(bracket.get("slots", [])))
+    slots = [str(value or "") for value in bracket.get("slots", [])]
+    slots.extend([""] * max(0, bracket_size - len(slots)))
+    qualifiers = {
+        str(item.get("player_id") or ""): item
+        for item in bracket.get("qualifiers", [])
+        if item.get("player_id")
+    }
+    chaves = sorted({
+        normalize_chave(item.get("chave"))
+        for item in qualifiers.values()
+    })
+    entries = []
+    for node_index in range(bracket_size // 2):
+        player_ids = slots[node_index * 2:node_index * 2 + 2]
+        entry = [qualifiers[player_id] for player_id in player_ids if player_id in qualifiers]
+        entries.append((node_index, entry))
+    entries.sort(key=lambda item: (
+        bracket_entry_order_key(item[1], chaves),
+        item[0],
+    ))
+    return [node_index for node_index, _entry in entries]
+
+
 def bracket_player_map(bracket, players):
     player_map = {str(player.get("player_id")): clean_public_player(player) for player in players}
     for qualifier in bracket.get("qualifiers", []):
@@ -1444,14 +1671,31 @@ def build_bracket_view(bracket, players, matches, group_phase_complete=True, is_
         round_nodes = []
         for node_index in range(node_count):
             node_id = f"R{round_number}M{node_index}"
+            source_node_ids = []
             if round_number == 1:
                 side_states = []
                 for slot_index in (node_index * 2, node_index * 2 + 1):
                     player_id = slots[slot_index] if slot_index < len(slots) else ""
                     side_states.append(("resolved", player_id) if player_id else ("empty", ""))
             else:
-                first_source = resolved_nodes[f"R{round_number - 1}M{node_index * 2}"]
-                second_source = resolved_nodes[f"R{round_number - 1}M{node_index * 2 + 1}"]
+                previous_node_count = bracket_size // (2 ** (round_number - 1))
+                source_indices = bracket_round_source_pairs(
+                    bracket,
+                    round_number,
+                    previous_node_count,
+                )[node_index]
+                if round_number == 2:
+                    first_round_order = bracket_first_round_node_order(bracket)
+                    source_indices = tuple(
+                        first_round_order[source_index]
+                        for source_index in source_indices
+                    )
+                source_node_ids = [
+                    f"R{round_number - 1}M{source_index}"
+                    for source_index in source_indices
+                ]
+                first_source = resolved_nodes[source_node_ids[0]]
+                second_source = resolved_nodes[source_node_ids[1]]
                 side_states = [
                     (first_source["outcome_status"], first_source["outcome_player_id"]),
                     (second_source["outcome_status"], second_source["outcome_player_id"]),
@@ -1507,6 +1751,7 @@ def build_bracket_view(bracket, players, matches, group_phase_complete=True, is_
                 "player1": participants[0],
                 "player2": participants[1],
                 "match": match,
+                "source_node_ids": source_node_ids,
                 "outcome_status": outcome_status,
                 "outcome_player_id": outcome_player_id,
             }
@@ -1617,7 +1862,7 @@ def build_knockout_match(round_item, bracket, node_id, player1, player2, order_i
     time_str = minutes_to_time(start_min)
     end_time = minutes_to_time(start_min + duration)
     match_id = make_id("match")
-    return {
+    item = {
         "pk": "MATCH",
         "sk": match_id,
         "type": "MATCH",
@@ -1651,6 +1896,11 @@ def build_knockout_match(round_item, bracket, node_id, player1, player2, order_i
         "double_loss": False,
         "created_at": now_iso(),
     }
+    apply_disciplinary_result(item, {
+        str(player1["player_id"]): player1,
+        str(player2["player_id"]): player2,
+    })
+    return item
 
 
 def create_knockout_rounds(data):
@@ -1765,6 +2015,8 @@ def create_knockout_rounds(data):
                 kind=spec["kind"],
             )
             put_item(match)
+            if match.get("administrative_loss_player_ids"):
+                put_item(result_item_for_match(match, match.get("result_saved_at")))
             created_matches.append(match)
         elapsed_games += len(specs)
 
@@ -1783,13 +2035,34 @@ def knockout_descendant_node_ids(match, bracket):
     round_text, index_text = node_id[1:].split("M", 1)
     round_number = normalize_int(round_text, 0)
     node_index = normalize_int(index_text, 0)
-    total_rounds = max(1, next_power_of_two(bracket.get("bracket_size", 2)).bit_length() - 1)
+    bracket_size = next_power_of_two(bracket.get("bracket_size", 2))
+    total_rounds = max(1, bracket_size.bit_length() - 1)
     descendants = set()
     if round_number == total_rounds - 1:
         descendants.add("THIRD")
     while round_number < total_rounds:
+        source_count = bracket_size // (2 ** round_number)
+        source_index = node_index
+        if round_number == 1:
+            first_round_order = bracket_first_round_node_order(bracket)
+            try:
+                source_index = first_round_order.index(node_index)
+            except ValueError:
+                break
+        source_pairs = bracket_round_source_pairs(
+            bracket,
+            round_number + 1,
+            source_count,
+        )
+        next_node_index = bracket_next_node_index(
+            source_count,
+            source_index,
+            source_pairs,
+        )
+        if next_node_index is None:
+            break
         round_number += 1
-        node_index //= 2
+        node_index = next_node_index
         descendants.add(f"R{round_number}M{node_index}")
     return descendants
 
@@ -2015,6 +2288,9 @@ def handle_admin_mutation(event, action):
         if action == "update-player":
             item = upsert_player(data)
             return response(200, {"player": item, "state": public_state()})
+        if action == "player-status":
+            result = set_player_status(data)
+            return response(200, {**result, "state": public_state()})
         if action == "sponsor":
             item = upsert_sponsor(data)
             return response(200, {"sponsor": item, "state": public_state()})
