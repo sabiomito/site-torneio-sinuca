@@ -140,6 +140,8 @@ function renderStandingsTable(rows) {
           ? '<span class="badge pending">Desclassificado</span>'
           : row.rank_status === 'banned'
             ? '<span class="badge pending">Banido</span>'
+            : row.rank_status === 'tiebreak_pending'
+              ? '<span class="badge pending">Desempate pendente</span>'
             : '<span class="muted">—</span>';
     html += `<tr class="${escapeHtml(row.rank_status)}">
       <td>${idx + 1}</td>

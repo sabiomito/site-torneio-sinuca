@@ -140,6 +140,7 @@ function statusText(rankStatus) {
   if (rankStatus === 'relegation') return 'Rebaixado';
   if (rankStatus === 'disqualified') return 'Desclassificado';
   if (rankStatus === 'banned') return 'Banido';
+  if (rankStatus === 'tiebreak_pending') return 'Desempate pendente';
   return '';
 }
 

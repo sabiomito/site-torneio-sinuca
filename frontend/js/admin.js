@@ -215,6 +215,7 @@ function renderAll() {
   adminState.round_requirements = adminState.round_requirements || [];
   adminState.sponsors = adminState.sponsors || [];
   adminState.brackets = adminState.brackets || {};
+  adminState.tiebreaks = adminState.tiebreaks || [];
   const config = adminState.config;
   document.getElementById('division-count').value = config.division_count;
   document.getElementById('duration-minutes').value = config.duration_minutes;
@@ -230,12 +231,142 @@ function renderAll() {
   restoreAdminMatchFilters(preservedMatchFilters);
   renderTvConfig();
   renderRoundRequirements();
+  renderTiebreaks();
   renderKnockoutStatus();
   renderKnockoutRoundsList();
   renderPlayersList();
   renderRoundsList();
   renderAdminMatches();
   renderSponsorsList();
+}
+
+function tiebreakResolutionLabel(resolution) {
+  const labels = {
+    direct: 'Confronto direto',
+    balls_balance: 'Saldo de bolas',
+    manual: 'Decisão registrada',
+    manual_required: 'Novo confronto necessário',
+    waiting_group: 'Aguardando jogos',
+    pending_direct: 'Confronto direto pendente',
+  };
+  return labels[resolution] || 'Em análise';
+}
+
+function renderTiebreakDirectChecks(tiebreak) {
+  const checks = tiebreak.direct_checks || [];
+  if (!checks.length) return '';
+  return `<div class="tiebreak-checks">${checks.map(check => {
+    if (check.status === 'pending') {
+      return `<div class="tiebreak-check"><strong>Confronto direto pendente</strong><span>Faltam ${Number(check.missing_games || 0)} jogo(s) entre os jogadores empatados.</span></div>`;
+    }
+    const scores = (check.scores || [])
+      .map(item => `${escapeHtml(item.name)}: ${Number(item.points || 0)} ponto(s)`)
+      .join(' · ');
+    const title = check.status === 'resolved'
+      ? 'Mini-tabela do confronto direto'
+      : 'Confronto direto empatado ou circular';
+    return `<div class="tiebreak-check"><strong>${title}</strong><span>${scores}</span></div>`;
+  }).join('')}</div>`;
+}
+
+function tiebreakPlayerOptions(players, selectedId = '') {
+  return `<option value="">Selecione</option>${players.map(player => (
+    `<option value="${escapeHtml(player.player_id)}" ${String(player.player_id) === String(selectedId) ? 'selected' : ''}>${escapeHtml(player.name)}</option>`
+  )).join('')}`;
+}
+
+function renderManualTiebreakGroup(group) {
+  const players = group.players || [];
+  if (group.status === 'waiting_group') {
+    return `<div class="message tiebreak-waiting">
+      <strong>Novo confronto ainda não liberado</strong>
+      <span>O confronto direto e o saldo estão iguais, mas a chave ainda possui jogos pendentes.</span>
+    </div>`;
+  }
+
+  const savedOrder = group.ordered_player_ids || [];
+  const controls = players.length === 2
+    ? `<label>Vencedor do novo confronto
+        <select data-tiebreak-winner>${tiebreakPlayerOptions(players, savedOrder[0] || '')}</select>
+      </label>`
+    : `<div class="grid-3">${players.map((player, index) => `
+        <label>${index + 1}ª posição no desempate
+          <select data-tiebreak-position="${index}">${tiebreakPlayerOptions(players, savedOrder[index] || '')}</select>
+        </label>
+      `).join('')}</div>`;
+  return `<form class="stack-form tiebreak-decision-form" data-tiebreak-decision="${escapeHtml(group.decision_id)}">
+    <div class="section-title compact-title">
+      <h4>${group.status === 'resolved' ? 'Ordem registrada' : 'Registrar resultado do novo confronto'}</h4>
+      <span>Saldo igual: ${players.map(player => escapeHtml(player.name)).join(', ')}</span>
+    </div>
+    ${controls}
+    <button type="submit">${group.status === 'resolved' ? 'Atualizar ordem' : 'Salvar ordem final'}</button>
+  </form>`;
+}
+
+function renderTiebreaks() {
+  const container = document.getElementById('tiebreaks-panel');
+  if (!container) return;
+  const tiebreaks = adminState.tiebreaks || [];
+  if (!tiebreaks.length) {
+    container.innerHTML = '<div class="empty">Nenhum empate por pontos no momento.</div>';
+    return;
+  }
+
+  container.innerHTML = `<div class="tiebreak-list">${tiebreaks.map(tiebreak => `
+    <article class="tiebreak-card">
+      <div class="section-title compact-title">
+        <div>
+          <h3>${divisionName(tiebreak.division)} · Chave ${escapeHtml(tiebreak.chave)}</h3>
+          <span>${Number(tiebreak.points || 0)} ponto(s) · ${tiebreak.players.length} jogadores empatados</span>
+        </div>
+        <span class="badge ${['manual_required', 'waiting_group', 'pending_direct'].includes(tiebreak.resolution) ? 'pending' : 'done'}">${escapeHtml(tiebreakResolutionLabel(tiebreak.resolution))}</span>
+      </div>
+      <ol class="tiebreak-order">
+        ${(tiebreak.players || []).map(player => `<li><strong>${escapeHtml(player.name)}</strong><span>Saldo ${Number(player.balls_balance || 0)}</span></li>`).join('')}
+      </ol>
+      <p class="muted">${escapeHtml(tiebreak.reason || '')}</p>
+      ${renderTiebreakDirectChecks(tiebreak)}
+      ${(tiebreak.manual_groups || []).map(renderManualTiebreakGroup).join('')}
+    </article>
+  `).join('')}</div>`;
+
+  container.querySelectorAll('.tiebreak-decision-form').forEach(form => {
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      const winner = form.querySelector('[data-tiebreak-winner]')?.value || '';
+      const orderedPlayerIds = [...form.querySelectorAll('[data-tiebreak-position]')]
+        .sort((first, second) => Number(first.dataset.tiebreakPosition) - Number(second.dataset.tiebreakPosition))
+        .map(select => select.value);
+      if (winner && orderedPlayerIds.length) {
+        toast('Formato de desempate inválido.');
+        return;
+      }
+      if (!winner && (!orderedPlayerIds.length || orderedPlayerIds.some(value => !value))) {
+        toast('Preencha toda a ordem do desempate.');
+        return;
+      }
+      if (orderedPlayerIds.length && new Set(orderedPlayerIds).size !== orderedPlayerIds.length) {
+        toast('Cada jogador deve aparecer uma única vez na ordem.');
+        return;
+      }
+      try {
+        const data = await adminFetch('/admin/tiebreak', {
+          method: 'POST',
+          body: JSON.stringify({
+            decision_id: form.dataset.tiebreakDecision,
+            winner_id: winner,
+            ordered_player_ids: orderedPlayerIds,
+          }),
+        });
+        adminState = data.state || await adminFetch('/admin/state');
+        preserveScroll(renderAll);
+        toast('Ordem do desempate salva.');
+      } catch (err) {
+        toast(err.message);
+      }
+    });
+  });
 }
 
 function renderRoundRequirements() {
@@ -269,7 +400,9 @@ function renderKnockoutStatus() {
   for (let division = 1; division <= Number(adminState.config.division_count || 0); division++) {
     const bracket = adminState.brackets[String(division)] || null;
     const chaves = adminState.standings?.[String(division)] || {};
-    const qualifiers = Object.values(chaves).flat().filter(row => row.rank_status === 'promotion');
+    const divisionRows = Object.values(chaves).flat();
+    const qualifiers = divisionRows.filter(row => row.rank_status === 'promotion');
+    const pendingTiebreaks = divisionRows.filter(row => row.rank_status === 'tiebreak_pending');
     const requirements = (adminState.round_requirements || []).filter(item => Number(item.division) === division);
     const pointsRemaining = requirements.reduce((total, item) => total + Number(item.remaining_pairs || 0), 0);
     const pointsComplete = requirements.length > 0 && pointsRemaining === 0;
@@ -292,7 +425,10 @@ function renderKnockoutStatus() {
     let metric = `${qualifiers.length} classificado(s) em verde`;
     let status = 'Configure ao menos 2 classificados verdes';
     let cls = 'pending-box';
-    if (bracket?.finished) {
+    if (pendingTiebreaks.length) {
+      metric = `${pendingTiebreaks.length} jogador(es) aguardando desempate`;
+      status = 'Resolva os desempates pendentes antes de criar o chaveamento.';
+    } else if (bracket?.finished) {
       status = 'Chaveamento concluído';
       cls = 'done-box';
       metric = 'Todas as fases concluídas';

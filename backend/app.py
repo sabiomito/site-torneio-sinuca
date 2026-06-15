@@ -615,6 +615,12 @@ def get_results():
     return results
 
 
+def get_tiebreak_decisions():
+    if _table is None:
+        return []
+    return scan_type("TIEBREAK")
+
+
 def derive_dates(matches, rounds):
     values = {}
     for item in list(rounds) + list(matches):
@@ -1307,7 +1313,246 @@ def set_match_result(data):
     return match
 
 
-def calculate_standings(players, matches, results, config):
+def tiebreak_decision_id(division, chave, player_ids):
+    raw = "|".join([
+        str(normalize_int(division, 1)),
+        normalize_chave(chave),
+        *sorted(str(player_id) for player_id in player_ids),
+    ])
+    return "TIEBREAK#" + hashlib.sha1(raw.encode("utf-8")).hexdigest()[:24]
+
+
+def group_tiebreak_signature(rows, group_results):
+    payload = {
+        "players": sorted([
+            {
+                "player_id": row.get("player_id"),
+                "points": row.get("points", 0),
+                "wins": row.get("wins", 0),
+                "balls_for": row.get("balls_for", 0),
+                "balls_against": row.get("balls_against", 0),
+                "balls_balance": row.get("balls_balance", 0),
+                "competition_status": row.get("competition_status", PLAYER_STATUS_ACTIVE),
+            }
+            for row in rows
+        ], key=lambda item: str(item["player_id"])),
+        "results": sorted([
+            {
+                "pair_key": item.get("pair_key"),
+                "winner_id": item.get("winner_id", ""),
+                "balls_p1": normalize_int(item.get("balls_p1"), 0, 0, 7),
+                "balls_p2": normalize_int(item.get("balls_p2"), 0, 0, 7),
+                "double_loss": bool(item.get("double_loss")),
+            }
+            for item in group_results
+        ], key=lambda item: str(item["pair_key"])),
+    }
+    serialized = json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha1(serialized.encode("utf-8")).hexdigest()
+
+
+def provisional_tiebreak_sort(rows):
+    return sorted(
+        rows,
+        key=lambda row: (
+            -normalize_int(row.get("balls_balance"), 0),
+            -normalize_int(row.get("balls_for"), 0),
+            -normalize_int(row.get("wins"), 0),
+            str(row.get("name", "")).lower(),
+        ),
+    )
+
+
+def resolve_points_tie(
+    rows,
+    result_by_pair,
+    division,
+    chave,
+    group_complete,
+    context_signature,
+    decisions_by_id,
+):
+    direct_checks = []
+    manual_groups = []
+    balance_used = False
+    pending_direct = False
+
+    def resolve_subset(subset):
+        nonlocal balance_used, pending_direct
+        if len(subset) < 2:
+            return list(subset)
+
+        direct_results = []
+        missing_pairs = []
+        for first, second in combinations(subset, 2):
+            pair_key = build_pair_key(
+                division,
+                chave,
+                first["player_id"],
+                second["player_id"],
+            )
+            result = result_by_pair.get(pair_key)
+            if not result or not result.get("is_finished"):
+                missing_pairs.append(pair_key)
+            else:
+                direct_results.append(result)
+
+        if missing_pairs:
+            pending_direct = True
+            direct_checks.append({
+                "player_ids": [row["player_id"] for row in subset],
+                "status": "pending",
+                "scores": [],
+                "missing_games": len(missing_pairs),
+            })
+            return provisional_tiebreak_sort(subset)
+
+        scores = {str(row["player_id"]): 0 for row in subset}
+        for result in direct_results:
+            winner_id = str(result.get("winner_id") or "")
+            if winner_id in scores and not result.get("double_loss"):
+                scores[winner_id] += 3
+
+        score_groups = {}
+        for row in subset:
+            score_groups.setdefault(scores[str(row["player_id"])], []).append(row)
+        direct_checks.append({
+            "player_ids": [row["player_id"] for row in subset],
+            "status": "tied" if len(score_groups) == 1 else "resolved",
+            "scores": [
+                {
+                    "player_id": row["player_id"],
+                    "name": row.get("name", ""),
+                    "points": scores[str(row["player_id"])],
+                }
+                for row in sorted(
+                    subset,
+                    key=lambda item: (
+                        -scores[str(item["player_id"])],
+                        str(item.get("name", "")).lower(),
+                    ),
+                )
+            ],
+            "missing_games": 0,
+        })
+
+        if len(score_groups) > 1:
+            ordered = []
+            for score in sorted(score_groups, reverse=True):
+                tied_score_rows = score_groups[score]
+                ordered.extend(
+                    resolve_subset(tied_score_rows)
+                    if len(tied_score_rows) > 1
+                    else tied_score_rows
+                )
+            return ordered
+
+        balance_used = True
+        balance_groups = {}
+        for row in subset:
+            balance_groups.setdefault(normalize_int(row.get("balls_balance"), 0), []).append(row)
+
+        ordered = []
+        for balance in sorted(balance_groups, reverse=True):
+            balance_rows = balance_groups[balance]
+            if len(balance_rows) == 1:
+                ordered.extend(balance_rows)
+                continue
+
+            player_ids = [str(row["player_id"]) for row in balance_rows]
+            decision_id = tiebreak_decision_id(division, chave, player_ids)
+            saved = decisions_by_id.get(decision_id) or {}
+            saved_order = [str(player_id) for player_id in saved.get("ordered_player_ids", [])]
+            saved_is_current = (
+                saved.get("context_signature") == context_signature
+                and len(saved_order) == len(player_ids)
+                and set(saved_order) == set(player_ids)
+            )
+            default_order = provisional_tiebreak_sort(balance_rows)
+            if len({normalize_int(row.get("balls_balance"), 0) for row in balance_rows}) == 1:
+                default_order = sorted(
+                    balance_rows,
+                    key=lambda row: str(row.get("name", "")).lower(),
+                )
+            row_by_id = {str(row["player_id"]): row for row in balance_rows}
+            if saved_is_current:
+                resolved_rows = [row_by_id[player_id] for player_id in saved_order]
+            else:
+                resolved_rows = default_order
+                if group_complete:
+                    for row in resolved_rows:
+                        row["tiebreak_pending"] = True
+
+            manual_groups.append({
+                "decision_id": decision_id,
+                "player_ids": player_ids,
+                "players": [
+                    {
+                        "player_id": row["player_id"],
+                        "name": row.get("name", ""),
+                        "balls_balance": row.get("balls_balance", 0),
+                    }
+                    for row in default_order
+                ],
+                "ordered_player_ids": saved_order if saved_is_current else [],
+                "context_signature": context_signature,
+                "status": (
+                    "resolved"
+                    if saved_is_current
+                    else "required"
+                    if group_complete
+                    else "waiting_group"
+                ),
+            })
+            ordered.extend(resolved_rows)
+        return ordered
+
+    ordered_rows = resolve_subset(rows)
+    unresolved_manual = any(item["status"] == "required" for item in manual_groups)
+    waiting_group = any(item["status"] == "waiting_group" for item in manual_groups)
+    resolved_manual = any(item["status"] == "resolved" for item in manual_groups)
+    if pending_direct:
+        resolution = "pending_direct"
+        reason = "Há confrontos diretos pendentes; a ordem exibida ainda é provisória."
+    elif waiting_group:
+        resolution = "waiting_group"
+        reason = "Confronto direto e saldo seguem iguais; aguarde a conclusão dos jogos da chave."
+    elif unresolved_manual:
+        resolution = "manual_required"
+        reason = "Confronto direto e saldo de bolas terminaram iguais. É necessário um novo confronto de desempate e registrar a ordem final."
+    elif resolved_manual:
+        resolution = "manual"
+        reason = "A ordem foi definida no painel de desempate após o novo confronto."
+    elif balance_used:
+        resolution = "balls_balance"
+        reason = "O confronto direto terminou empatado ou circular; o saldo de bolas decidiu a ordem."
+    else:
+        resolution = "direct"
+        reason = "O confronto direto decidiu a ordem."
+
+    return ordered_rows, {
+        "division": normalize_int(division, 1),
+        "chave": normalize_chave(chave),
+        "points": normalize_int(rows[0].get("points"), 0) if rows else 0,
+        "player_ids": [str(row["player_id"]) for row in rows],
+        "players": [
+            {
+                "player_id": row["player_id"],
+                "name": row.get("name", ""),
+                "points": row.get("points", 0),
+                "balls_balance": row.get("balls_balance", 0),
+            }
+            for row in ordered_rows
+        ],
+        "resolution": resolution,
+        "reason": reason,
+        "direct_checks": direct_checks,
+        "manual_groups": manual_groups,
+        "context_signature": context_signature,
+    }
+
+
+def calculate_standings_details(players, matches, results, config, tiebreak_decisions=None):
     table = {}
     for p in players:
         pid = p["player_id"]
@@ -1369,13 +1614,52 @@ def calculate_standings(players, matches, results, config):
         row["balls_balance"] = row["balls_for"] - row["balls_against"]
         grouped.setdefault(str(row["division"]), {}).setdefault(row["chave"], []).append(row)
 
+    decisions_by_id = {
+        str(item.get("tiebreak_id") or item.get("sk") or ""): item
+        for item in (tiebreak_decisions or [])
+    }
+    tiebreaks = []
     rules = config.get("rules", {}) or {}
     for division_str, chaves in grouped.items():
         rule = rules.get(str(division_str), {})
         promotion_count = normalize_int(rule.get("promotion_count", 0), 0, 0, 100)
         relegation_count = normalize_int(rule.get("relegation_count", 0), 0, 0, 100)
         for chave, rows in chaves.items():
-            rows.sort(key=lambda r: (-r["points"], -r["balls_balance"], -r["balls_for"], -r["wins"], r["name"].lower()))
+            division = normalize_int(division_str, 1)
+            group_results = [
+                item
+                for item in result_by_pair.values()
+                if normalize_int(item.get("division"), 1) == division
+                and normalize_chave(item.get("chave")) == normalize_chave(chave)
+            ]
+            context_signature = group_tiebreak_signature(rows, group_results)
+            expected_pairs = {
+                build_pair_key(division, chave, first["player_id"], second["player_id"])
+                for first, second in combinations(rows, 2)
+            }
+            group_complete = expected_pairs.issubset(set(result_by_pair))
+
+            rows_by_points = {}
+            for row in rows:
+                rows_by_points.setdefault(normalize_int(row.get("points"), 0), []).append(row)
+            ordered_rows = []
+            for points in sorted(rows_by_points, reverse=True):
+                points_rows = rows_by_points[points]
+                if len(points_rows) == 1:
+                    ordered_rows.extend(points_rows)
+                    continue
+                resolved_rows, detail = resolve_points_tie(
+                    points_rows,
+                    result_by_pair,
+                    division,
+                    chave,
+                    group_complete,
+                    context_signature,
+                    decisions_by_id,
+                )
+                ordered_rows.extend(resolved_rows)
+                tiebreaks.append(detail)
+            rows[:] = ordered_rows
             for index, row in enumerate(rows):
                 row["group_rank"] = index + 1
             for row in rows[:promotion_count]:
@@ -1385,9 +1669,90 @@ def calculate_standings(players, matches, results, config):
                     if row["rank_status"] != "promotion":
                         row["rank_status"] = "relegation"
             for row in rows:
+                if row.get("tiebreak_pending"):
+                    row["rank_status"] = "tiebreak_pending"
                 if row["competition_status"] in DISCIPLINARY_PLAYER_STATUSES:
                     row["rank_status"] = row["competition_status"]
-    return grouped
+    return {
+        "standings": grouped,
+        "tiebreaks": tiebreaks,
+    }
+
+
+def calculate_standings(players, matches, results, config, tiebreak_decisions=None):
+    return calculate_standings_details(
+        players,
+        matches,
+        results,
+        config,
+        tiebreak_decisions,
+    )["standings"]
+
+
+def save_tiebreak_decision(data):
+    decision_id = str(data.get("decision_id") or "")
+    if not decision_id:
+        raise ValueError("Desempate não informado.")
+
+    players = get_players()
+    matches = get_matches()
+    results = get_results()
+    config = get_config()
+    decisions = get_tiebreak_decisions()
+    details = calculate_standings_details(
+        players,
+        matches,
+        results,
+        config,
+        decisions,
+    )
+    parent = None
+    issue = None
+    for tiebreak in details["tiebreaks"]:
+        for manual_group in tiebreak.get("manual_groups", []):
+            if manual_group.get("decision_id") == decision_id:
+                parent = tiebreak
+                issue = manual_group
+                break
+        if issue:
+            break
+    if not issue or issue.get("status") == "waiting_group":
+        raise ValueError("Este desempate não está disponível para decisão manual.")
+
+    player_ids = [str(player_id) for player_id in issue.get("player_ids", [])]
+    ordered_player_ids = [
+        str(player_id)
+        for player_id in data.get("ordered_player_ids", [])
+        if str(player_id)
+    ]
+    winner_id = str(data.get("winner_id") or "")
+    if len(player_ids) == 2 and winner_id:
+        ordered_player_ids = [winner_id] + [
+            player_id for player_id in player_ids if player_id != winner_id
+        ]
+    if (
+        len(ordered_player_ids) != len(player_ids)
+        or set(ordered_player_ids) != set(player_ids)
+    ):
+        raise ValueError("Informe cada jogador uma única vez na ordem final do desempate.")
+
+    saved_at = now_iso()
+    item = {
+        "pk": "TIEBREAK",
+        "sk": decision_id,
+        "type": "TIEBREAK",
+        "tiebreak_id": decision_id,
+        "division": parent.get("division"),
+        "chave": parent.get("chave"),
+        "points": parent.get("points"),
+        "player_ids": player_ids,
+        "ordered_player_ids": ordered_player_ids,
+        "context_signature": issue.get("context_signature"),
+        "reason": parent.get("reason", ""),
+        "created_at": saved_at,
+    }
+    put_item(item)
+    return item
 
 
 def get_brackets():
@@ -1444,6 +1809,12 @@ def qualifier_sort_key(row):
 def division_qualifiers(division, standings):
     qualifiers = []
     chaves = (standings or {}).get(str(normalize_int(division, 1)), {}) or {}
+    if any(
+        row.get("rank_status") == "tiebreak_pending"
+        for rows in chaves.values()
+        for row in rows
+    ):
+        raise ValueError("Resolva os desempates pendentes antes de criar o chaveamento.")
     for chave in sorted(chaves):
         for index, row in enumerate(chaves[chave]):
             if row.get("rank_status") != "promotion":
@@ -1917,7 +2288,13 @@ def create_knockout_rounds(data):
     players = get_players()
     matches = get_matches()
     results = get_results()
-    standings = calculate_standings(players, matches, results, config)
+    standings = calculate_standings(
+        players,
+        matches,
+        results,
+        config,
+        get_tiebreak_decisions(),
+    )
     bracket = get_bracket(division)
     if not bracket:
         if not division_group_phase_complete(division, players, matches, results, config):
@@ -2247,7 +2624,15 @@ def public_state(include_matches=True):
     sponsors = get_sponsors()
     dates = derive_dates(matches, rounds)
     places = derive_places(matches, rounds)
-    standings = calculate_standings(players, matches, results, config)
+    tiebreak_decisions = get_tiebreak_decisions()
+    standings_details = calculate_standings_details(
+        players,
+        matches,
+        results,
+        config,
+        tiebreak_decisions,
+    )
+    standings = standings_details["standings"]
     brackets = build_public_brackets(config, players, matches, results, standings)
     requirements = round_requirements(config, players, rounds, matches, results)
     latest_result = latest_finished_match(matches)
@@ -2261,6 +2646,7 @@ def public_state(include_matches=True):
         "dates": dates,
         "places": places,
         "standings": standings,
+        "tiebreaks": standings_details["tiebreaks"],
         "brackets": brackets,
         "round_requirements": requirements,
         "latest_result": latest_result if include_matches else None,
@@ -2315,6 +2701,9 @@ def handle_admin_mutation(event, action):
         if action == "result":
             item = set_match_result(data)
             return response(200, {"match": item, "state": public_state()})
+        if action == "tiebreak":
+            item = save_tiebreak_decision(data)
+            return response(200, {"tiebreak": item, "state": public_state()})
         if action == "clear-database":
             if str(data.get("confirm_text", "")).strip().upper() != "LIMPAR":
                 raise ValueError("Digite LIMPAR para confirmar a limpeza definitiva do torneio.")

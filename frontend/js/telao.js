@@ -120,6 +120,8 @@ function renderTelaoTable(rows) {
             ? '<span class="status-warning">Desclassificado</span>'
             : row.rank_status === 'banned'
               ? '<span class="status-warning">Banido</span>'
+              : row.rank_status === 'tiebreak_pending'
+                ? '<span class="status-warning">Desempate pendente</span>'
               : '—';
       return `<tr class="${escapeHtml(row.rank_status || '')}">
         <td>${index + 1}</td>

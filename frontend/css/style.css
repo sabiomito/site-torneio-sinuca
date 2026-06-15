@@ -229,6 +229,39 @@ tr.relegation td:first-child, .rank-relegation td:first-child { border-left: 4px
   background: rgba(255,255,255,.025);
 }
 .player-disciplinary-actions p { margin: 4px 0 0; }
+.tiebreak-list { display: grid; gap: 16px; }
+.tiebreak-card {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(0,0,0,.16);
+}
+.tiebreak-order {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding-left: 28px;
+}
+.tiebreak-order li { padding-left: 4px; }
+.tiebreak-order li span { margin-left: 10px; color: var(--muted); }
+.tiebreak-checks { display: grid; gap: 8px; }
+.tiebreak-check {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255,255,255,.035);
+}
+.tiebreak-check span { color: var(--muted); }
+.tiebreak-decision-form {
+  padding: 14px;
+  border: 1px solid rgba(255, 209, 102, .32);
+  border-radius: 14px;
+  background: rgba(255, 209, 102, .055);
+}
+.tiebreak-waiting { justify-self: stretch; align-items: flex-start; }
 .message, .empty {
   padding: 12px 14px;
   border-radius: 14px;
