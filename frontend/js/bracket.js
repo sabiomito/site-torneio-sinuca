@@ -236,16 +236,25 @@ function renderKnockoutBracket(bracket, options = {}) {
     ? '<div class="empty bracket-empty-filter">Nenhum jogo pendente no chaveamento.</div>'
     : '';
   const finishedPodium = showFinishedPodium ? bracketFinishedPodiumHtml(bracket) : '';
+  const title = bracket.display_name || divisionName(bracket.division);
+  const participantLabel = bracket.bracket_kind === 'custom' ? 'competidores' : 'classificados';
+  const notes = [
+    bracket.is_preview ? 'prévia pelas posições atuais' : '',
+    bracket.manual_override && bracket.bracket_kind !== 'custom' ? 'editado manualmente' : '',
+    bracket.bracket_kind === 'custom' ? 'chave criada manualmente' : '',
+  ].filter(Boolean);
+  const noteText = notes.length ? ` · ${notes.map(escapeHtml).join(' · ')}` : '';
 
   return `<div class="${classes}" data-knockout-root data-division="${Number(bracket.division || 1)}"
+      data-bracket-id="${escapeHtml(bracket.bracket_id || '')}"
       data-filter-mode="${filterMode}" style="${inlineStyle}">
     <div class="bracket-heading">
       <div>
         <span>Chaveamento</span>
-        <h3>${divisionName(bracket.division)}</h3>
+        <h3>${escapeHtml(title)}</h3>
       </div>
       <div class="bracket-heading-actions">
-        <small>${Number(bracket.participant_count || 0)} classificados${bracket.is_preview ? ' · prévia pelas posições atuais' : ''}</small>
+        <small>${Number(bracket.participant_count || 0)} ${participantLabel}${noteText}</small>
         ${filterButtons}
       </div>
     </div>

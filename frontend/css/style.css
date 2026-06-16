@@ -457,6 +457,10 @@ tr.relegation td:first-child, .rank-relegation td:first-child { border-left: 4px
 .requirement-card.done-box { border-color: rgba(40, 209, 124, .28); }
 .requirement-card.pending-box { border-color: rgba(255, 209, 102, .32); }
 .manual-round-editor { margin-top: 16px; padding: 16px; border: 1px solid var(--line); border-radius: 18px; background: rgba(0,0,0,.16); }
+.bracket-editor-top { margin: 8px 0 12px; }
+.bracket-editor-actions { margin-top: 12px; }
+.custom-bracket-form { align-items: end; }
+.bracket-editor-game-row select:disabled { opacity: .72; cursor: not-allowed; }
 .manual-pair-list { display: grid; gap: 8px; margin: 12px 0; }
 .manual-pair-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: center; border: 1px solid rgba(255,255,255,.08); border-radius: 12px; padding: 10px; }
 .actions-row { display: flex; gap: 10px; flex-wrap: wrap; }

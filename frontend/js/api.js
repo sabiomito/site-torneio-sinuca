@@ -65,6 +65,10 @@ function divisionName(number) {
   return `${number}ª Divisão`;
 }
 
+function entityDivisionName(item) {
+  return item?.bracket_display_name || item?.display_name || divisionName(item?.division || 1);
+}
+
 function normalizeChaveLabel(value) {
   return String(value || 'A').trim().toUpperCase() || 'A';
 }
@@ -117,7 +121,7 @@ function matchScorelineHtml(match) {
 function matchStagePillsHtml(match) {
   if (match?.phase === 'knockout') {
     return `
-      <span class="match-info-chip">${divisionName(match.division)}</span>
+      <span class="match-info-chip">${escapeHtml(entityDivisionName(match))}</span>
       <span class="match-info-chip">${escapeHtml(matchStageLabel(match))}</span>
     `;
   }
@@ -230,7 +234,7 @@ function printableMatchRow(match) {
     ? `${match.balls_p1 || 0} x ${match.balls_p2 || 0}${match.double_loss ? ' (derrota para ambos)' : ''}`
     : '';
   const blank = '<span class="blank-score"></span> x <span class="blank-score"></span>';
-  const roundText = `${divisionName(match.division)} / ${escapeHtml(matchStageLabel(match))}`;
+  const roundText = `${escapeHtml(entityDivisionName(match))} / ${escapeHtml(matchStageLabel(match))}`;
   return `<tr>
     <td class="col-date">${escapeHtml(fmtDate(match.date))}</td>
     <td class="col-time">${escapeHtml(match.time || '')}</td>

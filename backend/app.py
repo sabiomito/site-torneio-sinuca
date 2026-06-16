@@ -826,6 +826,7 @@ def result_item_for_match(match, saved_at=None):
         "administrative_loss_player_ids": list(match.get("administrative_loss_player_ids") or []),
         "phase": match.get("phase", "group"),
         "bracket_id": match.get("bracket_id", ""),
+        "bracket_display_name": match.get("bracket_display_name", ""),
         "bracket_node_id": match.get("bracket_node_id", ""),
         "bracket_round": match.get("bracket_round", 0),
         "bracket_match_kind": match.get("bracket_match_kind", ""),
@@ -1196,7 +1197,7 @@ def delete_round(round_id):
         return {"deleted_pending_matches": 0, "preserved_finished_matches": 0}
     round_item = get_item("ROUND", round_id)
     if round_item and round_item.get("phase") == "knockout":
-        bracket = get_bracket(round_item.get("division"))
+        bracket = get_bracket_by_id(round_item.get("bracket_id")) or get_bracket(round_item.get("division"))
         round_matches = [
             match for match in get_matches()
             if str(match.get("round_id") or "") == round_id
@@ -1232,7 +1233,7 @@ def delete_round(round_id):
             and match.get("bracket_id") == round_item.get("bracket_id")
         ]
         bracket_unfrozen = False
-        if not remaining and bracket:
+        if not remaining and bracket and bracket_kind(bracket) == "division":
             delete_item("BRACKET", bracket["sk"])
             bracket_unfrozen = True
         return {
@@ -1759,11 +1760,58 @@ def get_brackets():
     if _table is None:
         return []
     brackets = scan_type("BRACKET")
-    return sorted(brackets, key=lambda item: normalize_int(item.get("division"), 1))
+    return sorted(brackets, key=lambda item: (
+        1 if bracket_kind(item) == "custom" else 0,
+        normalize_int(item.get("division"), 1),
+        str(item.get("display_name") or "").lower(),
+        str(item.get("bracket_id") or ""),
+    ))
 
 
 def get_bracket(division):
     return get_item("BRACKET", f"DIVISION#{normalize_int(division, 1)}")
+
+
+def bracket_kind(bracket):
+    return "custom" if str((bracket or {}).get("bracket_kind") or "").lower() == "custom" else "division"
+
+
+def bracket_display_name(bracket):
+    return str((bracket or {}).get("display_name") or "").strip()
+
+
+def get_bracket_by_id(bracket_id):
+    bracket_id = str(bracket_id or "")
+    if not bracket_id:
+        return None
+    for bracket in get_brackets():
+        if str(bracket.get("bracket_id") or "") == bracket_id:
+            return bracket
+    return None
+
+
+def bracket_has_created_rounds(bracket_id):
+    bracket_id = str(bracket_id or "")
+    if not bracket_id:
+        return False
+    if any(
+        item.get("phase") == "knockout"
+        and str(item.get("bracket_id") or "") == bracket_id
+        for item in get_rounds()
+    ):
+        return True
+    return any(
+        item.get("phase") == "knockout"
+        and str(item.get("bracket_id") or "") == bracket_id
+        for item in get_matches()
+    )
+
+
+def assert_bracket_editable(bracket_id):
+    if bracket_has_created_rounds(bracket_id):
+        raise ValueError(
+            "Este chaveamento ja possui rodada criada. Limpe os resultados e exclua a rodada de chaveamento antes de editar ou limpar a chave."
+        )
 
 
 def next_power_of_two(value):
@@ -1900,7 +1948,10 @@ def build_bracket_spec(division, standings):
         "sk": f"DIVISION#{normalize_int(division, 1)}",
         "type": "BRACKET",
         "bracket_id": bracket_id,
+        "bracket_kind": "division",
         "division": normalize_int(division, 1),
+        "display_name": "",
+        "manual_override": False,
         "participant_count": len(qualifiers),
         "bracket_size": bracket_size,
         "qualifiers": [{
@@ -2223,7 +2274,10 @@ def build_bracket_view(bracket, players, matches, group_phase_complete=True, is_
     created_matches = [match for match in match_map.values()]
     return {
         "bracket_id": bracket_id,
+        "bracket_kind": bracket_kind(bracket),
         "division": normalize_int(bracket.get("division"), 1),
+        "display_name": bracket_display_name(bracket),
+        "manual_override": bool(bracket.get("manual_override")),
         "participant_count": normalize_int(bracket.get("participant_count"), len(bracket.get("qualifiers", []))),
         "bracket_size": bracket_size,
         "total_rounds": total_rounds,
@@ -2243,9 +2297,11 @@ def build_bracket_view(bracket, players, matches, group_phase_complete=True, is_
 
 
 def build_public_brackets(config, players, matches, results, standings):
+    persisted_items = get_brackets()
     persisted = {
         normalize_int(item.get("division"), 1): item
-        for item in get_brackets()
+        for item in persisted_items
+        if bracket_kind(item) == "division"
     }
     views = {}
     for division in range(1, config["division_count"] + 1):
@@ -2266,7 +2322,208 @@ def build_public_brackets(config, players, matches, results, standings):
                 group_phase_complete=complete,
                 is_preview=is_preview,
             )
+    for bracket in persisted_items:
+        if bracket_kind(bracket) != "custom":
+            continue
+        views[str(bracket.get("bracket_id") or bracket.get("sk") or "")] = build_bracket_view(
+            bracket,
+            players,
+            matches,
+            group_phase_complete=True,
+            is_preview=False,
+        )
     return views
+
+
+def division_from_bracket_id(bracket_id):
+    match = re.match(r"^bracket_division_(\d+)$", str(bracket_id or ""))
+    return normalize_int(match.group(1), 0, 1) if match else 0
+
+
+def standings_context():
+    config = get_config()
+    players = get_players()
+    matches = get_matches()
+    results = get_results()
+    standings = calculate_standings(
+        players,
+        matches,
+        results,
+        config,
+        get_tiebreak_decisions(),
+    )
+    return config, players, matches, results, standings
+
+
+def editable_bracket_from_data(data):
+    bracket_id = str(data.get("bracket_id") or "")
+    bracket = get_bracket_by_id(bracket_id)
+    if bracket:
+        return bracket
+
+    config, players, matches, results, standings = standings_context()
+    division = division_from_bracket_id(bracket_id) or normalize_int(
+        data.get("division"),
+        1,
+        1,
+        config["division_count"],
+    )
+    if not division_group_phase_complete(division, players, matches, results, config):
+        raise ValueError("Finalize todos os jogos da fase de pontos dessa divisao antes de editar o chaveamento.")
+    return build_bracket_spec(division, standings)
+
+
+def normalize_bracket_slots_payload(raw_slots, bracket_size):
+    bracket_size = next_power_of_two(bracket_size)
+    if not isinstance(raw_slots, list):
+        raise ValueError("Informe os confrontos do chaveamento.")
+    slots = [str(value or "") for value in raw_slots]
+    if len(slots) != bracket_size:
+        raise ValueError(f"Este chaveamento precisa de {bracket_size} posicoes de competidor.")
+    return slots
+
+
+def player_qualifier_entry(player, source=None, seed=0):
+    source = dict(source or {})
+    clean = clean_public_player(player)
+    return {
+        "player_id": clean.get("player_id"),
+        "name": clean.get("name", ""),
+        "photo_url": clean.get("photo_url", ""),
+        "profile_url": clean.get("profile_url", ""),
+        "division": clean.get("division", source.get("division", 1)),
+        "chave": source.get("chave", clean.get("chave", "A")),
+        "group_rank": source.get("group_rank", 0),
+        "seed": source.get("seed", seed),
+    }
+
+
+def validate_bracket_slots(bracket, slots, players):
+    selected = [player_id for player_id in slots if player_id]
+    if len(selected) != len(set(selected)):
+        raise ValueError("Cada competidor so pode aparecer uma vez no chaveamento.")
+
+    player_by_id = {
+        str(player.get("player_id") or ""): player
+        for player in players
+        if player.get("player_id")
+    }
+    source_by_id = {
+        str(item.get("player_id") or ""): item
+        for item in bracket.get("qualifiers", [])
+        if item.get("player_id")
+    }
+
+    if bracket_kind(bracket) == "division":
+        expected = set(source_by_id)
+        if set(selected) != expected:
+            raise ValueError("Use exatamente os classificados da divisao, sem repetir jogador e mantendo as folgas vazias.")
+        allowed = source_by_id
+    else:
+        expected_count = normalize_int(bracket.get("participant_count"), 0, 2)
+        if len(selected) != expected_count:
+            raise ValueError(f"Selecione exatamente {expected_count} competidor(es) para esta chave.")
+        allowed = player_by_id
+
+    invalid = [player_id for player_id in selected if player_id not in allowed and player_id not in player_by_id]
+    if invalid:
+        raise ValueError("O chaveamento contem competidor que nao existe mais.")
+
+    qualifiers = []
+    for seed, player_id in enumerate(selected, start=1):
+        player = player_by_id.get(player_id) or source_by_id.get(player_id)
+        qualifiers.append(player_qualifier_entry(player, source_by_id.get(player_id), seed))
+    return qualifiers
+
+
+def save_bracket_structure(data):
+    bracket = editable_bracket_from_data(data)
+    assert_bracket_editable(bracket.get("bracket_id"))
+    config, players, matches, results, _standings = standings_context()
+    if bracket_kind(bracket) == "division" and not division_group_phase_complete(
+        bracket.get("division"),
+        players,
+        matches,
+        results,
+        config,
+    ):
+        raise ValueError("Finalize todos os jogos da fase de pontos dessa divisao antes de editar o chaveamento.")
+
+    bracket_size = next_power_of_two(bracket.get("bracket_size") or len(bracket.get("slots", [])))
+    slots = normalize_bracket_slots_payload(data.get("slots"), bracket_size)
+    qualifiers = validate_bracket_slots(bracket, slots, players)
+    bracket["slots"] = slots
+    bracket["qualifiers"] = qualifiers
+    bracket["participant_count"] = len(qualifiers)
+    bracket["bracket_size"] = bracket_size
+    bracket["manual_override"] = True
+    bracket["bracket_kind"] = bracket_kind(bracket)
+    bracket["created_at"] = bracket.get("created_at") or now_iso()
+    put_item(bracket)
+    return {"bracket": bracket}
+
+
+def clear_bracket_structure(data):
+    bracket_id = str(data.get("bracket_id") or "")
+    bracket = get_bracket_by_id(bracket_id)
+    if not bracket:
+        return {"ok": True}
+    if bracket_kind(bracket) == "custom":
+        raise ValueError("Chave criada manualmente nao volta para a tabela. Exclua a chave se quiser remove-la.")
+    assert_bracket_editable(bracket.get("bracket_id"))
+    delete_item("BRACKET", bracket["sk"])
+    return {"ok": True}
+
+
+def next_custom_bracket_division(config):
+    used = [normalize_int(item.get("division"), 0) for item in get_brackets()]
+    return max([1000, normalize_int(config.get("division_count"), 1), *used]) + 1
+
+
+def create_custom_bracket(data):
+    config = get_config()
+    name = str(data.get("name") or "").strip()[:80]
+    participant_count = normalize_int(data.get("participant_count"), 0, 2, 512)
+    if not name:
+        raise ValueError("Informe o nome da nova chave.")
+    existing_names = {
+        bracket_display_name(item).lower()
+        for item in get_brackets()
+        if bracket_kind(item) == "custom"
+    }
+    if name.lower() in existing_names:
+        raise ValueError("Ja existe uma chave criada com esse nome.")
+
+    bracket_size = next_power_of_two(participant_count)
+    bracket_id = make_id("bracket_custom")
+    item = {
+        "pk": "BRACKET",
+        "sk": f"CUSTOM#{bracket_id}",
+        "type": "BRACKET",
+        "bracket_id": bracket_id,
+        "bracket_kind": "custom",
+        "division": next_custom_bracket_division(config),
+        "display_name": name,
+        "manual_override": True,
+        "participant_count": participant_count,
+        "bracket_size": bracket_size,
+        "qualifiers": [],
+        "slots": [""] * bracket_size,
+        "created_at": now_iso(),
+    }
+    put_item(item)
+    return {"bracket": item}
+
+
+def delete_custom_bracket(data):
+    bracket = get_bracket_by_id(data.get("bracket_id"))
+    if not bracket:
+        raise ValueError("Chaveamento nao encontrado.")
+    if bracket_kind(bracket) != "custom":
+        raise ValueError("Somente chaveamentos criados manualmente podem ser excluidos por aqui.")
+    assert_bracket_editable(bracket.get("bracket_id"))
+    delete_item("BRACKET", bracket["sk"])
+    return {"ok": True}
 
 
 def build_knockout_match(round_item, bracket, node_id, player1, player2, order_index, kind="main"):
@@ -2290,6 +2547,7 @@ def build_knockout_match(round_item, bracket, node_id, player1, player2, order_i
         "chave": "CHAVEAMENTO",
         "phase": "knockout",
         "bracket_id": bracket["bracket_id"],
+        "bracket_display_name": bracket_display_name(bracket),
         "bracket_node_id": node_id,
         "bracket_round": round_item["bracket_round"],
         "bracket_match_kind": kind,
@@ -2319,7 +2577,20 @@ def build_knockout_match(round_item, bracket, node_id, player1, player2, order_i
 
 def create_knockout_rounds(data):
     config = get_config()
-    division = normalize_int(data.get("division"), 1, 1, config["division_count"])
+    requested_bracket_id = str(data.get("bracket_id") or "")
+    bracket = get_bracket_by_id(requested_bracket_id) if requested_bracket_id else None
+    if requested_bracket_id and not bracket:
+        raise ValueError("Chaveamento nao encontrado.")
+    max_division = max(
+        normalize_int(config.get("division_count"), 1),
+        normalize_int((bracket or {}).get("division"), 1),
+    )
+    division = normalize_int(
+        data.get("division"),
+        normalize_int((bracket or {}).get("division"), 1),
+        1,
+        max_division,
+    )
     name = str(data.get("name") or "").strip()
     date = normalize_date(str(data.get("date") or "").strip())
     start_time = normalize_time(str(data.get("start_time") or "09:00").strip(), "09:00")
@@ -2338,12 +2609,13 @@ def create_knockout_rounds(data):
         config,
         get_tiebreak_decisions(),
     )
-    bracket = get_bracket(division)
+    bracket = bracket or get_bracket(division)
     if not bracket:
         if not division_group_phase_complete(division, players, matches, results, config):
             raise ValueError("Finalize todos os jogos da fase de pontos dessa divisão antes de criar o chaveamento.")
         bracket = build_bracket_spec(division, standings)
         put_item(bracket)
+    division = normalize_int(bracket.get("division"), division)
 
     view = build_bracket_view(bracket, players, matches, group_phase_complete=True)
     creatable = []
@@ -2420,6 +2692,7 @@ def create_knockout_rounds(data):
             "phase": "knockout",
             "mode": "knockout",
             "bracket_id": bracket["bracket_id"],
+            "bracket_display_name": bracket_display_name(bracket),
             "created_at": now_iso(),
         }
         put_item(round_item)
@@ -2484,7 +2757,7 @@ def knockout_descendant_node_ids(match, bracket):
 
 
 def invalidate_pending_knockout_descendants(match):
-    bracket = get_bracket(match.get("division"))
+    bracket = get_bracket_by_id(match.get("bracket_id")) or get_bracket(match.get("division"))
     if not bracket:
         return 0
     descendant_ids = knockout_descendant_node_ids(match, bracket)
@@ -2730,6 +3003,18 @@ def handle_admin_mutation(event, action):
             return response(200, {**result, "state": public_state()})
         if action == "knockout-rounds":
             result = create_knockout_rounds(data)
+            return response(200, {**result, "state": public_state()})
+        if action == "save-bracket":
+            result = save_bracket_structure(data)
+            return response(200, {**result, "state": public_state()})
+        if action == "clear-bracket":
+            result = clear_bracket_structure(data)
+            return response(200, {**result, "state": public_state()})
+        if action == "create-bracket":
+            result = create_custom_bracket(data)
+            return response(200, {**result, "state": public_state()})
+        if action == "delete-bracket":
+            result = delete_custom_bracket(data)
             return response(200, {**result, "state": public_state()})
         if action == "delete-round":
             result = delete_round(data.get("round_id"))

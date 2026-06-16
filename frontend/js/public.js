@@ -176,6 +176,7 @@ function renderStandings() {
     const chaveNames = Object.keys(chaves).sort();
     const divisionPlayers = chaveNames.reduce((total, chave) => total + (chaves[chave] || []).length, 0);
     const bracket = state.config.show_bracket_scoreboard !== false ? state.brackets?.[String(d)] : null;
+    const bracketKey = bracket?.bracket_id || String(d);
     const currentView = bracket
       ? (standingsViewByDivision[d] || (bracket.group_phase_complete ? 'bracket' : 'table'))
       : 'table';
@@ -214,11 +215,25 @@ function renderStandings() {
       ${bracket ? `<div class="standings-bracket-view ${currentView === 'bracket' ? '' : 'hidden'}" data-division-bracket="${d}">
         ${renderKnockoutBracket(bracket, {
           showFilter: true,
-          filterMode: bracketGameFilterByDivision[d] || 'all',
+          filterMode: bracketGameFilterByDivision[bracketKey] || 'all',
         })}
       </div>` : ''}
     </section>`;
   }
+  const customBrackets = state.config.show_bracket_scoreboard === false
+    ? []
+    : Object.values(state.brackets || {})
+      .filter(bracket => bracket?.bracket_kind === 'custom')
+      .sort((first, second) => Number(first.division || 0) - Number(second.division || 0));
+  customBrackets.forEach(bracket => {
+    const key = bracket.bracket_id || String(bracket.division || '');
+    html += `<section class="card standings-card custom-bracket-card">
+      ${renderKnockoutBracket(bracket, {
+        showFilter: true,
+        filterMode: bracketGameFilterByDivision[key] || 'all',
+      })}
+    </section>`;
+  });
   standingsEl.innerHTML = html;
   standingsEl.querySelectorAll('[data-view-toggle]').forEach(toggle => {
     toggle.querySelectorAll('[data-standings-view]').forEach(button => {
@@ -249,8 +264,8 @@ function renderStandings() {
   standingsEl.querySelectorAll('[data-bracket-filter-mode]').forEach(button => {
     button.addEventListener('click', () => {
       const root = button.closest('[data-knockout-root]');
-      const division = Number(root?.dataset.division || 1);
-      bracketGameFilterByDivision[division] = button.dataset.bracketFilterMode || 'all';
+      const key = root?.dataset.bracketId || root?.dataset.division || '1';
+      bracketGameFilterByDivision[key] = button.dataset.bracketFilterMode || 'all';
       renderStandings();
     });
   });

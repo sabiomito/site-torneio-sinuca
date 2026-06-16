@@ -148,6 +148,36 @@
         </div>
       </section>
 
+      <section class="card collapsible closed" data-section="bracket-editor">
+        <button class="collapse-title" type="button"><span>▾</span> Editar chaveamento</button>
+        <div class="collapse-body">
+          <p class="muted">Edite os confrontos da primeira fase antes de criar uma rodada de chaveamento. Se a rodada ja existir, limpe os resultados e exclua a rodada para liberar a edicao.</p>
+          <div class="grid-3 bracket-editor-top">
+            <label>Chave
+              <select id="bracket-editor-select"></select>
+            </label>
+          </div>
+          <div id="bracket-editor-warning" class="message hidden"></div>
+          <div id="bracket-editor-games" class="manual-round-editor"></div>
+          <div class="actions-row bracket-editor-actions">
+            <button type="button" id="save-bracket-structure">Salvar chave</button>
+            <button type="button" id="clear-bracket-structure" class="secondary">Limpar edicao automatica</button>
+            <button type="button" id="delete-custom-bracket" class="danger">Excluir chave criada</button>
+          </div>
+
+          <h3 class="subheading">Criar nova chave</h3>
+          <form id="custom-bracket-form" class="grid-3 custom-bracket-form">
+            <label>Nome da chave
+              <input type="text" id="custom-bracket-name" placeholder="Ex.: Repescagem" required>
+            </label>
+            <label>Quantidade de competidores
+              <input type="number" id="custom-bracket-count" min="2" value="2" required>
+            </label>
+            <button type="submit">Criar nova chave</button>
+          </form>
+        </div>
+      </section>
+
       <section class="card collapsible closed" data-section="matches">
         <button class="collapse-title" type="button"><span>▾</span> Partidas e resultados</button>
         <div class="collapse-body">

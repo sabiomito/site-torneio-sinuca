@@ -1,4 +1,5 @@
 let adminState = null;
+let selectedBracketEditorId = '';
 
 const els = {
   loginCard: document.getElementById('login-card'),
@@ -70,6 +71,45 @@ function fillAllChavesFilter(select, firstLabel = 'Todas') {
   if ([...select.options].some(opt => opt.value === current)) select.value = current;
 }
 
+function bracketDisplayNameAdmin(bracket) {
+  return bracket?.display_name || divisionName(bracket?.division || 1);
+}
+
+function adminDivisionLabel(item) {
+  return item?.bracket_display_name || item?.display_name || divisionName(item?.division || 1);
+}
+
+function bracketEditorEntries() {
+  return Object.values(adminState?.brackets || {})
+    .filter(Boolean)
+    .sort((first, second) => (
+      (first.bracket_kind === 'custom' ? 1 : 0) - (second.bracket_kind === 'custom' ? 1 : 0)
+      || Number(first.division || 0) - Number(second.division || 0)
+      || bracketDisplayNameAdmin(first).localeCompare(bracketDisplayNameAdmin(second), 'pt-BR')
+    ));
+}
+
+function fillKnockoutTargetSelect() {
+  const select = document.getElementById('knockout-division');
+  if (!select) return;
+  const current = select.value;
+  let html = '';
+  for (let division = 1; division <= Number(adminState?.config?.division_count || 0); division++) {
+    html += `<option value="division:${division}">${divisionName(division)}</option>`;
+  }
+  const custom = bracketEditorEntries().filter(bracket => bracket.bracket_kind === 'custom');
+  if (custom.length) {
+    html += '<option disabled>-- Chaves criadas --</option>';
+    html += custom.map(bracket => (
+      `<option value="bracket:${escapeHtml(bracket.bracket_id)}">${escapeHtml(bracketDisplayNameAdmin(bracket))}</option>`
+    )).join('');
+  }
+  select.innerHTML = html;
+  if ([...select.options].some(option => option.value === current)) {
+    select.value = current;
+  }
+}
+
 async function adminFetch(path, options = {}) {
   return apiFetch(path, Object.assign({}, options, {admin: true}));
 }
@@ -136,10 +176,11 @@ function collectRules(containerId) {
 
 function fillDivisionAndKeyControls() {
   const count = adminState.config.division_count;
-  ['player-division', 'round-division', 'knockout-division', 'admin-filter-division'].forEach(id => {
+  ['player-division', 'round-division', 'admin-filter-division'].forEach(id => {
     const first = id === 'admin-filter-division' ? 'Todas' : null;
     fillDivisionSelect(document.getElementById(id), count, first);
   });
+  fillKnockoutTargetSelect();
   fillChaveSelect(document.getElementById('player-chave'), Number(document.getElementById('player-division').value || 1));
   fillChaveSelect(document.getElementById('round-chave'), Number(document.getElementById('round-division').value || 1));
 }
@@ -163,7 +204,7 @@ function renderTvConfig() {
   fillSelect(document.getElementById('tv-filter-date'), adminState.dates, 'date', d => fmtDate(d.date), 'Todas');
   fillSelect(document.getElementById('tv-filter-place'), adminState.places, 'place_id', 'name', 'Todos');
   fillSelect(document.getElementById('tv-filter-player'), adminState.players, 'player_id', p => `${p.name} — ${divisionName(p.division)} / Chave ${normalizeChave(p.chave)}`, 'Todos');
-  fillSelect(document.getElementById('tv-filter-round'), adminState.rounds, 'round_id', r => `${fmtDate(r.date)} · ${r.name} · ${divisionName(r.division)} · ${roundStageLabel(r)}`, 'Todas');
+  fillSelect(document.getElementById('tv-filter-round'), adminState.rounds, 'round_id', r => `${fmtDate(r.date)} · ${r.name} · ${adminDivisionLabel(r)} · ${roundStageLabel(r)}`, 'Todas');
   fillDivisionSelect(document.getElementById('tv-filter-division'), adminState.config.division_count, 'Todas');
   fillAllChavesFilter(document.getElementById('tv-filter-chave'), 'Todas');
   Object.entries({
@@ -226,7 +267,7 @@ function renderAll() {
   fillSelect(document.getElementById('admin-filter-date'), adminState.dates, 'date', d => fmtDate(d.date), 'Todas');
   fillSelect(document.getElementById('admin-filter-place'), adminState.places, 'place_id', 'name', 'Todos');
   fillSelect(document.getElementById('admin-filter-player'), adminState.players, 'player_id', p => `${p.name} — ${divisionName(p.division)} / Chave ${normalizeChave(p.chave)}`, 'Todos');
-  fillSelect(document.getElementById('admin-filter-round'), adminState.rounds, 'round_id', r => `${fmtDate(r.date)} · ${r.name} · ${divisionName(r.division)} · ${roundStageLabel(r)}`, 'Todas');
+  fillSelect(document.getElementById('admin-filter-round'), adminState.rounds, 'round_id', r => `${fmtDate(r.date)} · ${r.name} · ${adminDivisionLabel(r)} · ${roundStageLabel(r)}`, 'Todas');
   fillAllChavesFilter(document.getElementById('admin-filter-chave'), 'Todas');
   restoreAdminMatchFilters(preservedMatchFilters);
   renderTvConfig();
@@ -234,6 +275,7 @@ function renderAll() {
   renderTiebreaks();
   renderKnockoutStatus();
   renderKnockoutRoundsList();
+  renderBracketEditor();
   renderPlayersList();
   renderRoundsList();
   renderAdminMatches();
@@ -545,7 +587,7 @@ function renderKnockoutRoundsList() {
     const pending = matches.filter(match => !match.is_finished).length;
     return `<div class="list-item round-item">
       <div>
-        <strong>${divisionName(round.division)} · ${escapeHtml(round.stage_name || 'Chaveamento')}</strong>
+        <strong>${escapeHtml(adminDivisionLabel(round))} · ${escapeHtml(round.stage_name || 'Chaveamento')}</strong>
         <div class="match-meta">${fmtDate(round.date)} · ${escapeHtml(round.start_time || '09:00')} · ${escapeHtml(round.name)} · ${matches.length} jogo(s) · ${pending} pendente(s)</div>
       </div>
       <button class="small danger" data-delete-knockout-round="${escapeHtml(round.round_id)}">Excluir rodada</button>
@@ -557,6 +599,169 @@ function renderKnockoutRoundsList() {
       if (round) deleteRoundById(round);
     });
   });
+}
+
+function bracketEditorBlocked(bracket) {
+  const bracketId = String(bracket?.bracket_id || '');
+  if (!bracketId) return false;
+  return (adminState.rounds || []).some(round => (
+    round.phase === 'knockout' && String(round.bracket_id || '') === bracketId
+  )) || (adminState.matches || []).some(match => (
+    match.phase === 'knockout' && String(match.bracket_id || '') === bracketId
+  ));
+}
+
+function bracketEditorPlayerOptions(bracket, selectedId = '') {
+  const custom = bracket?.bracket_kind === 'custom';
+  const sourcePlayers = custom ? (adminState.players || []) : (bracket?.qualifiers || []);
+  const players = [...sourcePlayers].sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'pt-BR'));
+  if (selectedId && !players.some(player => String(player.player_id || '') === String(selectedId))) {
+    players.push({player_id: selectedId, name: `Competidor ${selectedId}`});
+  }
+  return `<option value="">Vazio / BYE</option>${players.map(player => (
+    `<option value="${escapeHtml(player.player_id)}" ${String(player.player_id || '') === String(selectedId) ? 'selected' : ''}>${escapeHtml(player.name || '')}</option>`
+  )).join('')}`;
+}
+
+function bracketEditorSlots() {
+  const selects = [...document.querySelectorAll('#bracket-editor-games [data-bracket-slot]')];
+  return selects
+    .sort((first, second) => Number(first.dataset.bracketSlot) - Number(second.dataset.bracketSlot))
+    .map(select => select.value || '');
+}
+
+function currentBracketEditorSelection() {
+  const select = document.getElementById('bracket-editor-select');
+  const entries = bracketEditorEntries();
+  const selectedId = select?.value || selectedBracketEditorId || entries[0]?.bracket_id || '';
+  return entries.find(bracket => String(bracket.bracket_id || '') === String(selectedId)) || entries[0] || null;
+}
+
+async function saveBracketEditorSelection() {
+  const bracket = currentBracketEditorSelection();
+  if (!bracket) return;
+  try {
+    const data = await adminFetch('/admin/save-bracket', {
+      method: 'POST',
+      body: JSON.stringify({
+        bracket_id: bracket.bracket_id,
+        slots: bracketEditorSlots(),
+      }),
+    });
+    selectedBracketEditorId = data.bracket?.bracket_id || bracket.bracket_id;
+    adminState = data.state || await adminFetch('/admin/state');
+    preserveScroll(renderAll);
+    toast('Chave salva.');
+  } catch (err) {
+    toast(err.message);
+  }
+}
+
+async function clearBracketEditorSelection() {
+  const bracket = currentBracketEditorSelection();
+  if (!bracket) return;
+  if (!confirm('Limpar a edicao desta chave automatica? Ela voltara a acompanhar a tabela da fase de pontos.')) return;
+  try {
+    const data = await adminFetch('/admin/clear-bracket', {
+      method: 'POST',
+      body: JSON.stringify({bracket_id: bracket.bracket_id}),
+    });
+    selectedBracketEditorId = bracket.bracket_id;
+    adminState = data.state || await adminFetch('/admin/state');
+    preserveScroll(renderAll);
+    toast('Edicao da chave limpa.');
+  } catch (err) {
+    toast(err.message);
+  }
+}
+
+async function deleteBracketEditorSelection() {
+  const bracket = currentBracketEditorSelection();
+  if (!bracket) return;
+  if (!confirm('Excluir esta chave criada?')) return;
+  try {
+    const data = await adminFetch('/admin/delete-bracket', {
+      method: 'POST',
+      body: JSON.stringify({bracket_id: bracket.bracket_id}),
+    });
+    selectedBracketEditorId = '';
+    adminState = data.state || await adminFetch('/admin/state');
+    preserveScroll(renderAll);
+    toast('Chave excluida.');
+  } catch (err) {
+    toast(err.message);
+  }
+}
+
+function renderBracketEditor() {
+  const select = document.getElementById('bracket-editor-select');
+  const games = document.getElementById('bracket-editor-games');
+  const warning = document.getElementById('bracket-editor-warning');
+  const saveButton = document.getElementById('save-bracket-structure');
+  const clearButton = document.getElementById('clear-bracket-structure');
+  const deleteButton = document.getElementById('delete-custom-bracket');
+  if (!select || !games || !warning || !saveButton || !clearButton || !deleteButton) return;
+
+  const entries = bracketEditorEntries();
+  if (!entries.length) {
+    select.innerHTML = '<option value="">Nenhuma chave disponivel</option>';
+    games.innerHTML = '<div class="empty">Ainda nao ha chave automatica ou criada para editar.</div>';
+    warning.classList.add('hidden');
+    saveButton.disabled = true;
+    clearButton.disabled = true;
+    deleteButton.disabled = true;
+    return;
+  }
+
+  const currentId = selectedBracketEditorId || select.value || entries[0].bracket_id;
+  select.innerHTML = entries.map(bracket => {
+    const kind = bracket.bracket_kind === 'custom'
+      ? 'criada'
+      : (bracket.manual_override ? 'automatica editada' : (bracket.is_preview ? 'previa automatica' : 'automatica'));
+    return `<option value="${escapeHtml(bracket.bracket_id)}">${escapeHtml(bracketDisplayNameAdmin(bracket))} (${kind})</option>`;
+  }).join('');
+  select.value = entries.some(bracket => String(bracket.bracket_id) === String(currentId))
+    ? currentId
+    : entries[0].bracket_id;
+  selectedBracketEditorId = select.value;
+  select.onchange = () => {
+    selectedBracketEditorId = select.value;
+    renderBracketEditor();
+  };
+
+  const bracket = currentBracketEditorSelection();
+  const blocked = bracketEditorBlocked(bracket);
+  const waitingPoints = bracket.bracket_kind !== 'custom' && bracket.group_phase_complete === false;
+  const disabled = blocked || waitingPoints;
+  const firstRoundNodes = bracket.rounds?.[0]?.nodes || [];
+  games.innerHTML = `<h3>${escapeHtml(bracketDisplayNameAdmin(bracket))}</h3>
+    <p class="muted">${Number(bracket.participant_count || 0)} competidor(es) · ${Number(firstRoundNodes.length || 0)} jogo(s) na primeira fase.</p>
+    <div class="manual-pair-list">${firstRoundNodes.map((node, index) => {
+      const left = node.player1?.player?.player_id || '';
+      const right = node.player2?.player?.player_id || '';
+      const leftSlot = index * 2;
+      const rightSlot = leftSlot + 1;
+      return `<div class="manual-game-row bracket-editor-game-row" data-game-index="${index}">
+        <span class="manual-game-label">Jogo ${index + 1}</span>
+        <select data-bracket-slot="${leftSlot}" ${disabled ? 'disabled' : ''}>${bracketEditorPlayerOptions(bracket, left)}</select>
+        <span class="manual-versus">x</span>
+        <select data-bracket-slot="${rightSlot}" ${disabled ? 'disabled' : ''}>${bracketEditorPlayerOptions(bracket, right)}</select>
+      </div>`;
+    }).join('')}</div>`;
+
+  const warningText = blocked
+    ? 'Este chaveamento ja possui rodada criada. Para editar a chave, limpe os resultados dessas partidas e exclua a rodada do chaveamento.'
+    : waitingPoints
+      ? 'Finalize todos os jogos da fase de pontos desta divisao antes de salvar uma edicao da chave automatica.'
+      : '';
+  warning.textContent = warningText;
+  warning.classList.toggle('hidden', !warningText);
+  saveButton.disabled = disabled;
+  clearButton.disabled = disabled || bracket.bracket_kind === 'custom' || bracket.is_preview;
+  deleteButton.disabled = disabled || bracket.bracket_kind !== 'custom';
+  saveButton.onclick = saveBracketEditorSelection;
+  clearButton.onclick = clearBracketEditorSelection;
+  deleteButton.onclick = deleteBracketEditorSelection;
 }
 
 function renderRoundsList() {
@@ -571,7 +776,7 @@ function renderRoundsList() {
     return `<div class="list-item round-item">
       <div class="round-main">
         <strong>${escapeHtml(r.name)} · ${fmtDate(r.date)} · ${escapeHtml(r.start_time || '09:00')}</strong>
-        <div class="match-meta">${divisionName(r.division)} · ${escapeHtml(roundStageLabel(r))} · ${r.mode === 'knockout' ? 'chaveamento' : (r.mode === 'manual' ? 'manual' : 'automática')} · ${matchCount} jogo(s)</div>
+        <div class="match-meta">${escapeHtml(adminDivisionLabel(r))} · ${escapeHtml(roundStageLabel(r))} · ${r.mode === 'knockout' ? 'chaveamento' : (r.mode === 'manual' ? 'manual' : 'automática')} · ${matchCount} jogo(s)</div>
         <div class="round-edit-line">
           <input type="text" data-round-name-input="${escapeHtml(r.round_id)}" value="${escapeHtml(r.name)}" aria-label="Novo nome da rodada">
           <button class="small secondary" data-update-round="${escapeHtml(r.round_id)}">Salvar nome</button>
@@ -640,6 +845,14 @@ function currentRoundBase() {
     date: document.getElementById('round-date').value,
     start_time: document.getElementById('round-start-time').value || '09:00',
   };
+}
+
+function currentKnockoutTargetPayload() {
+  const value = document.getElementById('knockout-division')?.value || 'division:1';
+  if (value.startsWith('bracket:')) {
+    return {bracket_id: value.slice('bracket:'.length)};
+  }
+  return {division: Number(value.replace('division:', '') || 1)};
 }
 
 function playersForRoundForm() {
@@ -836,7 +1049,7 @@ function renderAdminMatches() {
     const doubleLoss = Boolean(match.double_loss);
     const isKnockout = match.phase === 'knockout';
     return `<form class="result-form ${match.is_finished ? 'finished' : ''}" data-match-id="${escapeHtml(match.match_id)}">
-      <div class="match-meta">${fmtDate(match.date)} · ${escapeHtml(match.time || '--:--')} até ${escapeHtml(match.end_time || '--:--')} · ${escapeHtml(match.place_name || 'Sem local')} · ${divisionName(match.division)} · ${escapeHtml(matchStageLabel(match))} ${match.round_deleted ? '· rodada excluída' : ''} ${match.is_finished ? '· finalizada' : ''} ${doubleLoss ? '· derrota para ambos' : ''}</div>
+      <div class="match-meta">${fmtDate(match.date)} · ${escapeHtml(match.time || '--:--')} até ${escapeHtml(match.end_time || '--:--')} · ${escapeHtml(match.place_name || 'Sem local')} · ${escapeHtml(adminDivisionLabel(match))} · ${escapeHtml(matchStageLabel(match))} ${match.round_deleted ? '· rodada excluída' : ''} ${match.is_finished ? '· finalizada' : ''} ${doubleLoss ? '· derrota para ambos' : ''}</div>
       <strong>${escapeHtml(match.player1_name)} x ${escapeHtml(match.player2_name)}</strong>
       <div class="result-grid">
         <label>Resultado
@@ -978,7 +1191,7 @@ function setupEvents() {
       const data = await adminFetch('/admin/knockout-rounds', {
         method: 'POST',
         body: JSON.stringify({
-          division: Number(document.getElementById('knockout-division').value || 1),
+          ...currentKnockoutTargetPayload(),
           name: document.getElementById('knockout-name').value,
           date: document.getElementById('knockout-date').value,
           start_time: document.getElementById('knockout-start-time').value || '09:00',
@@ -987,6 +1200,27 @@ function setupEvents() {
       adminState = data.state || await adminFetch('/admin/state');
       preserveScroll(renderAll);
       toast(`${data.created || 0} confronto(s) do chaveamento criado(s).`);
+    } catch (err) {
+      toast(err.message);
+    }
+  });
+
+  document.getElementById('custom-bracket-form').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    try {
+      const data = await adminFetch('/admin/create-bracket', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: document.getElementById('custom-bracket-name').value,
+          participant_count: Number(document.getElementById('custom-bracket-count').value || 2),
+        }),
+      });
+      selectedBracketEditorId = data.bracket?.bracket_id || '';
+      document.getElementById('custom-bracket-name').value = '';
+      document.getElementById('custom-bracket-count').value = '2';
+      adminState = data.state || await adminFetch('/admin/state');
+      preserveScroll(renderAll);
+      toast('Nova chave criada. Selecione os competidores e salve.');
     } catch (err) {
       toast(err.message);
     }
