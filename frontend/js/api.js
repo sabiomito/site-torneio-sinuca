@@ -95,6 +95,39 @@ function matchResultText(match) {
   return `<span class="score"><span class="${p1Winner ? 'winner' : ''}">${playerLinkHtml(match.player1_id, match.player1_name, 'player-link compact-link')} ${match.balls_p1 || 0}</span> x <span class="${p2Winner ? 'winner' : ''}">${match.balls_p2 || 0} ${playerLinkHtml(match.player2_id, match.player2_name, 'player-link compact-link')}</span></span>${note}`;
 }
 
+function matchScorelineHtml(match) {
+  const p1Winner = match.is_finished && match.winner_id === match.player1_id;
+  const p2Winner = match.is_finished && match.winner_id === match.player2_id;
+  const p1State = match.is_finished ? (p1Winner ? 'win' : 'loss') : 'pending';
+  const p2State = match.is_finished ? (p2Winner ? 'win' : 'loss') : 'pending';
+  const p1Score = match.is_finished ? Number(match.balls_p1 || 0) : '—';
+  const p2Score = match.is_finished ? Number(match.balls_p2 || 0) : '—';
+  const note = match.double_loss ? '<span class="badge loss double-loss-note">Derrota para ambos</span>' : '';
+  const pending = match.is_finished ? '' : '<span class="badge pending double-loss-note">Pendente</span>';
+  return `<div class="match-scoreline">
+    <span class="match-player-card match-player-card-${p1State}">${playerLinkHtml(match.player1_id, match.player1_name, 'player-link compact-link')}</span>
+    <span class="match-score-number">${p1Score}</span>
+    <span class="match-score-versus">x</span>
+    <span class="match-score-number">${p2Score}</span>
+    <span class="match-player-card match-player-card-${p2State}">${playerLinkHtml(match.player2_id, match.player2_name, 'player-link compact-link')}</span>
+    ${note || pending}
+  </div>`;
+}
+
+function matchStagePillsHtml(match) {
+  if (match?.phase === 'knockout') {
+    return `
+      <span class="match-info-chip">${divisionName(match.division)}</span>
+      <span class="match-info-chip">${escapeHtml(matchStageLabel(match))}</span>
+    `;
+  }
+  return `
+    <span class="match-info-chip">${divisionName(match.division)}</span>
+    <span class="match-info-chip">Chave ${escapeHtml(normalizeChaveLabel(match?.chave))}</span>
+    <span class="match-info-chip">Rodada ${escapeHtml(match?.round_number || '-')}</span>
+  `;
+}
+
 function getFilteredMatches(matches, filters) {
   return matches.filter(match => {
     if (filters.date && match.date !== filters.date) return false;
@@ -311,26 +344,26 @@ function renderMatches(container, matches) {
     container.innerHTML = '<div class="empty">Nenhuma partida encontrada.</div>';
     return;
   }
-  const byDate = groupBy(matches, m => m.date || 'Sem data');
-  const html = Object.keys(byDate).sort().map(date => {
-    const dayMatches = byDate[date];
-    const byPlace = groupBy(dayMatches, m => m.place_name || 'Sem local');
-    const placesHtml = Object.keys(byPlace).sort().map(place => {
-      const rows = byPlace[place].sort((a,b) => String(a.time).localeCompare(String(b.time))).map(match => `
-        <div class="match-row ${match.is_finished ? 'finished' : ''}">
-          <div class="match-main">
-            <span class="pill">${divisionName(match.division)} · ${escapeHtml(matchStageLabel(match))}</span>
-            <span class="time">${escapeHtml(match.time || '--:--')}</span>
-            <strong>${playerLinkHtml(match.player1_id, match.player1_name)}</strong>
-            <span class="versus">x</span>
-            <strong>${playerLinkHtml(match.player2_id, match.player2_name)}</strong>
-          </div>
-          <div class="match-status">${matchResultText(match)}</div>
+  const sorted = [...matches].sort((a, b) =>
+    String(a.date || '').localeCompare(String(b.date || '')) ||
+    String(a.time || '').localeCompare(String(b.time || '')) ||
+    String(a.place_name || '').localeCompare(String(b.place_name || '')) ||
+    String(a.round_number || '').localeCompare(String(b.round_number || ''))
+  );
+  const html = sorted.map(match => `
+    <div class="match-row ${match.is_finished ? 'finished' : ''}">
+      <div class="match-main">
+        <div class="match-info-cluster match-info-stage">
+          ${matchStagePillsHtml(match)}
         </div>
-      `).join('');
-      return `<article class="match-group"><h3>${fmtDate(date)} · ${escapeHtml(place)}</h3><div class="matches-list">${rows}</div></article>`;
-    }).join('');
-    return placesHtml;
-  }).join('');
-  container.innerHTML = `<div class="match-groups">${html}</div>`;
+        <div class="match-info-cluster match-info-schedule">
+          <span class="match-info-chip">${escapeHtml(match.place_name || 'Sem local')}</span>
+          <span class="match-info-chip">${fmtDate(match.date)}</span>
+          <span class="match-info-chip time">${escapeHtml(match.time || '--:--')}</span>
+        </div>
+      </div>
+      <div class="match-status">${matchScorelineHtml(match)}</div>
+    </div>
+  `).join('');
+  container.innerHTML = `<div class="matches-list">${html}</div>`;
 }

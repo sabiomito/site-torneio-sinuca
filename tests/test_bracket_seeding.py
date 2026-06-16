@@ -48,6 +48,38 @@ def source_ids(view, round_number):
     ]
 
 
+def round_player_ids(view, round_number):
+    return [
+        (
+            node["player1"]["player"]["player_id"],
+            node["player2"]["player"]["player_id"],
+        )
+        for node in view["rounds"][round_number - 1]["nodes"]
+    ]
+
+
+def layout_order_ids(view, round_number):
+    return [
+        node["node_id"]
+        for node in sorted(
+            view["rounds"][round_number - 1]["nodes"],
+            key=lambda item: item["layout_index"],
+        )
+    ]
+
+
+def players_from_qualifiers(qualifiers):
+    return [
+        {
+            "player_id": qualifier["player_id"],
+            "name": qualifier["name"],
+            "division": qualifier.get("division", 1),
+            "chave": qualifier.get("chave", "A"),
+        }
+        for qualifier in qualifiers
+    ]
+
+
 def two_group_qualifiers():
     qualifiers = []
     seed = 1
@@ -65,6 +97,33 @@ def two_group_qualifiers():
     return qualifiers
 
 
+def single_group_qualifiers(count):
+    return [
+        {
+            "player_id": f"A{rank}",
+            "name": f"A {rank}",
+            "division": 1,
+            "chave": "A",
+            "group_rank": rank,
+            "seed": rank,
+        }
+        for rank in range(1, count + 1)
+    ]
+
+
+def first_round_matches_from_slots(slots, winners):
+    return [
+        finished_match(
+            1,
+            index,
+            slots[index * 2],
+            slots[index * 2 + 1],
+            winner,
+        )
+        for index, winner in enumerate(winners)
+    ]
+
+
 def test_two_groups_are_numbered_from_a1_vs_b8_through_a8_vs_b1():
     bracket_size, slots = app.bracket_slots_for_qualifiers(two_group_qualifiers())
     games = [tuple(slots[index:index + 2]) for index in range(0, len(slots), 2)]
@@ -80,6 +139,111 @@ def test_two_groups_are_numbered_from_a1_vs_b8_through_a8_vs_b1():
         ("A7", "B2"),
         ("A8", "B1"),
     ]
+
+
+def test_single_group_example_pairs_game_a_against_d_and_b_against_c():
+    qualifiers = single_group_qualifiers(8)
+    bracket_size, slots = app.bracket_slots_for_qualifiers(qualifiers)
+    bracket = {
+        "bracket_id": "bracket-1",
+        "division": 1,
+        "participant_count": 8,
+        "bracket_size": bracket_size,
+        "slots": slots,
+        "qualifiers": qualifiers,
+    }
+    view = app.build_bracket_view(
+        bracket,
+        players_from_qualifiers(qualifiers),
+        first_round_matches_from_slots(slots, ["A1", "A2", "A3", "A4"]),
+    )
+
+    assert bracket_size == 8
+    assert [tuple(slots[index:index + 2]) for index in range(0, len(slots), 2)] == [
+        ("A1", "A8"),
+        ("A2", "A7"),
+        ("A3", "A6"),
+        ("A4", "A5"),
+    ]
+    assert source_ids(view, 2) == [
+        ("R1M0", "R1M3"),
+        ("R1M1", "R1M2"),
+    ]
+    assert round_player_ids(view, 2) == [
+        ("A1", "A4"),
+        ("A2", "A3"),
+    ]
+    assert layout_order_ids(view, 1) == ["R1M0", "R1M3", "R1M1", "R1M2"]
+
+
+def test_two_group_example_pairs_next_round_as_requested_and_lays_out_semifinals():
+    qualifiers = two_group_qualifiers()
+    bracket_size, slots = app.bracket_slots_for_qualifiers(qualifiers)
+    bracket = {
+        "bracket_id": "bracket-1",
+        "division": 1,
+        "participant_count": 16,
+        "bracket_size": bracket_size,
+        "slots": slots,
+        "qualifiers": qualifiers,
+    }
+    first_round = first_round_matches_from_slots(
+        slots,
+        ["A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8"],
+    )
+    quarterfinals = [
+        finished_match(2, 0, "A1", "A4", "A1"),
+        finished_match(2, 1, "A3", "A6", "A3"),
+        finished_match(2, 2, "A5", "A8", "A5"),
+        finished_match(2, 3, "A7", "A2", "A7"),
+    ]
+    view = app.build_bracket_view(
+        bracket,
+        players_from_qualifiers(qualifiers),
+        first_round + quarterfinals,
+    )
+
+    assert [tuple(slots[index:index + 2]) for index in range(0, len(slots), 2)] == [
+        ("A1", "B8"),
+        ("A2", "B7"),
+        ("A3", "B6"),
+        ("A4", "B5"),
+        ("A5", "B4"),
+        ("A6", "B3"),
+        ("A7", "B2"),
+        ("A8", "B1"),
+    ]
+    assert source_ids(view, 2) == [
+        ("R1M0", "R1M3"),
+        ("R1M2", "R1M5"),
+        ("R1M4", "R1M7"),
+        ("R1M6", "R1M1"),
+    ]
+    assert round_player_ids(view, 2) == [
+        ("A1", "A4"),
+        ("A3", "A6"),
+        ("A5", "A8"),
+        ("A7", "A2"),
+    ]
+    assert source_ids(view, 3) == [
+        ("R2M0", "R2M3"),
+        ("R2M1", "R2M2"),
+    ]
+    assert round_player_ids(view, 3) == [
+        ("A1", "A7"),
+        ("A3", "A5"),
+    ]
+    assert layout_order_ids(view, 1) == [
+        "R1M0",
+        "R1M3",
+        "R1M6",
+        "R1M1",
+        "R1M2",
+        "R1M5",
+        "R1M4",
+        "R1M7",
+    ]
+    assert layout_order_ids(view, 2) == ["R2M0", "R2M3", "R2M1", "R2M2"]
 
 
 def test_eight_initial_games_follow_requested_quarterfinal_and_semifinal_map():

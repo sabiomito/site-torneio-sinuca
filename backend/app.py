@@ -1979,11 +1979,57 @@ def bracket_round_source_pairs(bracket, target_round_number, source_count):
     return bracket_source_pairs(source_count)
 
 
-def bracket_next_node_index(source_count, source_index, source_pairs=None):
-    for target_index, source_pair in enumerate(source_pairs or bracket_source_pairs(source_count)):
-        if source_index in source_pair:
-            return target_index
-    return None
+def bracket_source_indices_for_node(bracket, target_round_number, target_node_index, source_count):
+    source_pairs = bracket_round_source_pairs(
+        bracket,
+        target_round_number,
+        source_count,
+    )
+    if target_node_index < 0 or target_node_index >= len(source_pairs):
+        return ()
+    source_indices = source_pairs[target_node_index]
+    if target_round_number == 2:
+        first_round_order = bracket_first_round_node_order(bracket)
+        source_indices = tuple(
+            first_round_order[source_index]
+            for source_index in source_indices
+            if source_index < len(first_round_order)
+        )
+    return source_indices
+
+
+def bracket_layout_indices(bracket, bracket_size):
+    bracket_size = next_power_of_two(bracket_size)
+    total_rounds = max(1, bracket_size.bit_length() - 1)
+    children_by_node = {}
+    for round_number in range(2, total_rounds + 1):
+        node_count = bracket_size // (2 ** round_number)
+        source_count = bracket_size // (2 ** (round_number - 1))
+        for node_index in range(node_count):
+            children_by_node[(round_number, node_index)] = [
+                (round_number - 1, source_index)
+                for source_index in bracket_source_indices_for_node(
+                    bracket,
+                    round_number,
+                    node_index,
+                    source_count,
+                )
+            ]
+
+    orders = {round_number: [] for round_number in range(1, total_rounds + 1)}
+
+    def visit(node):
+        round_number, _node_index = node
+        for child in children_by_node.get(node, []):
+            visit(child)
+        orders[round_number].append(node)
+
+    visit((total_rounds, 0))
+    return {
+        node: layout_index
+        for round_nodes in orders.values()
+        for layout_index, node in enumerate(round_nodes)
+    }
 
 
 def bracket_first_round_node_order(bracket):
@@ -2034,6 +2080,7 @@ def build_bracket_view(bracket, players, matches, group_phase_complete=True, is_
     }
     slots = [str(value or "") for value in bracket.get("slots", [])]
     slots.extend([""] * max(0, bracket_size - len(slots)))
+    layout_indices = bracket_layout_indices(bracket, bracket_size)
     resolved_nodes = {}
     rounds = []
 
@@ -2050,17 +2097,12 @@ def build_bracket_view(bracket, players, matches, group_phase_complete=True, is_
                     side_states.append(("resolved", player_id) if player_id else ("empty", ""))
             else:
                 previous_node_count = bracket_size // (2 ** (round_number - 1))
-                source_indices = bracket_round_source_pairs(
+                source_indices = bracket_source_indices_for_node(
                     bracket,
                     round_number,
+                    node_index,
                     previous_node_count,
-                )[node_index]
-                if round_number == 2:
-                    first_round_order = bracket_first_round_node_order(bracket)
-                    source_indices = tuple(
-                        first_round_order[source_index]
-                        for source_index in source_indices
-                    )
+                )
                 source_node_ids = [
                     f"R{round_number - 1}M{source_index}"
                     for source_index in source_indices
@@ -2118,6 +2160,7 @@ def build_bracket_view(bracket, players, matches, group_phase_complete=True, is_
                 "node_id": node_id,
                 "round_number": round_number,
                 "node_index": node_index,
+                "layout_index": layout_indices.get((round_number, node_index), node_index),
                 "status": node_status,
                 "player1": participants[0],
                 "player2": participants[1],
@@ -2418,27 +2461,23 @@ def knockout_descendant_node_ids(match, bracket):
     if round_number == total_rounds - 1:
         descendants.add("THIRD")
     while round_number < total_rounds:
+        next_round_number = round_number + 1
         source_count = bracket_size // (2 ** round_number)
-        source_index = node_index
-        if round_number == 1:
-            first_round_order = bracket_first_round_node_order(bracket)
-            try:
-                source_index = first_round_order.index(node_index)
-            except ValueError:
+        target_count = bracket_size // (2 ** next_round_number)
+        next_node_index = None
+        for target_index in range(target_count):
+            source_indices = bracket_source_indices_for_node(
+                bracket,
+                next_round_number,
+                target_index,
+                source_count,
+            )
+            if node_index in source_indices:
+                next_node_index = target_index
                 break
-        source_pairs = bracket_round_source_pairs(
-            bracket,
-            round_number + 1,
-            source_count,
-        )
-        next_node_index = bracket_next_node_index(
-            source_count,
-            source_index,
-            source_pairs,
-        )
         if next_node_index is None:
             break
-        round_number += 1
+        round_number = next_round_number
         node_index = next_node_index
         descendants.add(f"R{round_number}M{node_index}")
     return descendants

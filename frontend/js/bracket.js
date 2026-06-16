@@ -38,6 +38,20 @@ function bracketNodeVisible(node, filterMode) {
   return !['finished', 'bye', 'empty'].includes(node.status);
 }
 
+function bracketNodeLayoutIndex(node) {
+  return Number(node?.layout_index ?? node?.node_index ?? 0);
+}
+
+function bracketSourceNodeId(matchNode, side) {
+  return matchNode?.getAttribute?.(`data-source-node-${side}`) || '';
+}
+
+function bracketTargetSide(targetNode, sourceNodeId) {
+  if (bracketSourceNodeId(targetNode, 1) === sourceNodeId) return 1;
+  if (bracketSourceNodeId(targetNode, 2) === sourceNodeId) return 2;
+  return 0;
+}
+
 function bracketMatchHtml(node, filterMode = 'all', options = {}) {
   if (!bracketNodeVisible(node, filterMode)) return '';
   const match = node.match || null;
@@ -50,6 +64,8 @@ function bracketMatchHtml(node, filterMode = 'all', options = {}) {
   const secondCrown = options.isFinal && match?.is_finished
     ? (node.player2?.state === 'winner' ? 'gold' : 'silver')
     : '';
+  const firstState = node.player1?.state || 'unknown';
+  const secondState = node.player2?.state || 'unknown';
   const classes = [
     'bracket-match',
     `bracket-match-${node.status || 'pending'}`,
@@ -57,6 +73,7 @@ function bracketMatchHtml(node, filterMode = 'all', options = {}) {
     options.isFinal ? 'bracket-match-final' : '',
     firstCrown || secondCrown ? 'bracket-match-awarded' : '',
   ].filter(Boolean).join(' ');
+  const layoutIndex = bracketNodeLayoutIndex(node);
   const gridStyle = [
     options.gridStart && options.gridSpan
       ? `grid-column:${options.gridStart} / span ${options.gridSpan}`
@@ -67,9 +84,15 @@ function bracketMatchHtml(node, filterMode = 'all', options = {}) {
       data-bracket-node="${escapeHtml(node.node_id)}"
       data-round-number="${Number(node.round_number || 0)}"
       data-node-index="${Number(node.node_index || 0)}"
+      data-layout-index="${layoutIndex}"
       data-source-node-1="${escapeHtml(node.source_node_ids?.[0] || '')}"
       data-source-node-2="${escapeHtml(node.source_node_ids?.[1] || '')}"
       data-node-status="${escapeHtml(node.status || 'pending')}">
+    <div class="bracket-match-connector" aria-hidden="true">
+      <span class="bracket-match-connector-segment bracket-match-connector-left bracket-match-connector-${escapeHtml(firstState)}"></span>
+      <span class="bracket-match-connector-segment bracket-match-connector-right bracket-match-connector-${escapeHtml(secondState)}"></span>
+    </div>
+    <div class="bracket-match-advance-lines" aria-hidden="true"></div>
     <div class="bracket-players">
       ${bracketPlayerHtml(node.player1, node.node_id, 1, {crown: firstCrown})}
       ${bracketPlayerHtml(node.player2, node.node_id, 2, {crown: secondCrown})}
@@ -137,14 +160,21 @@ function bracketRoundHtml(round, filterMode, totalRounds, basePhotoSize) {
     Math.round(basePhotoSize * 1.7),
     basePhotoSize + ((Number(round.round_number || 1) - 1) * 22),
   );
-  const nodes = (round.nodes || [])
-    .map(node => bracketMatchHtml(node, filterMode, {
-      gridStart: (Number(node.node_index || 0) * gridSpan) + 1,
-      gridSpan,
-      isBaseRound,
-      isFinal,
-      matchPhotoSize,
-    }))
+  const nodes = [...(round.nodes || [])]
+    .sort((first, second) =>
+      bracketNodeLayoutIndex(first) - bracketNodeLayoutIndex(second) ||
+      Number(first.node_index || 0) - Number(second.node_index || 0)
+    )
+    .map(node => {
+      const layoutIndex = bracketNodeLayoutIndex(node);
+      return bracketMatchHtml(node, filterMode, {
+        gridStart: (layoutIndex * gridSpan) + 1,
+        gridSpan,
+        isBaseRound,
+        isFinal,
+        matchPhotoSize,
+      });
+    })
     .filter(Boolean);
   if (!nodes.length) return '';
   return `<section class="bracket-round ${isBaseRound ? 'bracket-round-base' : ''} ${isFinal ? 'bracket-round-final' : ''}" data-bracket-round="${Number(round.round_number)}">
@@ -221,7 +251,6 @@ function renderKnockoutBracket(bracket, options = {}) {
     </div>
     <div class="bracket-scroll">
       <div class="knockout-canvas">
-        <svg class="bracket-lines" aria-hidden="true"></svg>
         <div class="bracket-rounds">
           ${finishedPodium}
           ${finalHtml}
@@ -238,18 +267,25 @@ function bracketLineColor(state) {
   if (state === 'winner') return '#28d17c';
   if (state === 'loser') return '#ff6464';
   if (state === 'pending') return '#ffd166';
-  return '#526476';
+  return '#7f8fa3';
 }
 
-function bracketSvgPath(svg, pathData, color, width = 3) {
-  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-  path.setAttribute('d', pathData);
-  path.setAttribute('fill', 'none');
-  path.setAttribute('stroke', color);
-  path.setAttribute('stroke-width', String(width));
-  path.setAttribute('stroke-linecap', 'round');
-  path.setAttribute('stroke-linejoin', 'round');
-  svg.appendChild(path);
+function bracketMatchCompetitorsDefined(matchNode) {
+  const players = [...(matchNode?.querySelectorAll?.(':scope > .bracket-players > .bracket-player') || [])];
+  return players.length >= 2 && players.every(player => (
+    player.dataset.slotState && player.dataset.slotState !== 'unknown'
+  ));
+}
+
+function bracketAdvanceLineColor(sourceNode) {
+  const nodeStatus = sourceNode.dataset.nodeStatus || 'pending';
+  if (nodeStatus === 'finished' || nodeStatus === 'bye') return bracketLineColor('winner');
+  if (nodeStatus === 'pending') {
+    return bracketMatchCompetitorsDefined(sourceNode)
+      ? bracketLineColor('pending')
+      : bracketLineColor('unknown');
+  }
+  return bracketLineColor('unknown');
 }
 
 function bracketPhotoPoint(photo, canvasRect, edge) {
@@ -265,7 +301,57 @@ function bracketPhotoPoint(photo, canvasRect, edge) {
   };
 }
 
-function drawMatchConnector(svg, matchNode, canvasRect) {
+function bracketAdvanceRoute(sourceJunction, target) {
+  const elbowY = sourceJunction.y + ((target.bottom - sourceJunction.y) / 2);
+  return [
+    {x: sourceJunction.x, y: sourceJunction.y},
+    {x: sourceJunction.x, y: elbowY},
+    {x: target.centerX, y: elbowY},
+    {x: target.centerX, y: target.bottom},
+  ];
+}
+
+function bracketAdvancePath(sourceJunction, target) {
+  const [start, firstTurn, secondTurn, end] = bracketAdvanceRoute(sourceJunction, target);
+  return `M ${start.x} ${start.y} V ${firstTurn.y} H ${secondTurn.x} V ${end.y}`;
+}
+
+function bracketAdvanceSegment(layer, start, end, color, width = 4) {
+  const horizontal = Math.abs(end.x - start.x) >= Math.abs(end.y - start.y);
+  const length = horizontal ? Math.abs(end.x - start.x) : Math.abs(end.y - start.y);
+  if (length < 1) return;
+  const segment = document.createElement('span');
+  segment.className = 'bracket-advance-segment';
+  segment.style.background = color;
+  segment.style.boxShadow = `0 0 10px ${color}66`;
+  segment.style.left = `${horizontal ? Math.min(start.x, end.x) : start.x - (width / 2)}px`;
+  segment.style.top = `${horizontal ? start.y - (width / 2) : Math.min(start.y, end.y)}px`;
+  segment.style.width = `${horizontal ? length : width}px`;
+  segment.style.height = `${horizontal ? width : length}px`;
+  layer.appendChild(segment);
+}
+
+function drawAdvanceLine(sourceNode, sourceJunction, target, canvasRect, color) {
+  const layer = sourceNode.querySelector(':scope > .bracket-match-advance-lines');
+  if (!layer) return;
+  const sourceRect = sourceNode.getBoundingClientRect();
+  const sourceLeft = sourceRect.left - canvasRect.left;
+  const sourceTop = sourceRect.top - canvasRect.top;
+  const localSource = {
+    x: sourceJunction.x - sourceLeft,
+    y: sourceJunction.y - sourceTop,
+  };
+  const localTarget = {
+    centerX: target.centerX - sourceLeft,
+    bottom: target.bottom - sourceTop,
+  };
+  const route = bracketAdvanceRoute(localSource, localTarget);
+  for (let index = 0; index < route.length - 1; index += 1) {
+    bracketAdvanceSegment(layer, route[index], route[index + 1], color, 4);
+  }
+}
+
+function drawMatchConnector(matchNode, canvasRect) {
   const firstPlayer = matchNode.querySelector(':scope > .bracket-players > .bracket-player[data-side="1"]');
   const secondPlayer = matchNode.querySelector(':scope > .bracket-players > .bracket-player[data-side="2"]');
   const firstPhoto = firstPlayer?.querySelector('.bracket-photo');
@@ -275,26 +361,18 @@ function drawMatchConnector(svg, matchNode, canvasRect) {
   const second = bracketPhotoPoint(secondPhoto, canvasRect, 'left');
   const junctionX = (first.right + second.left) / 2;
   const junctionY = (first.centerY + second.centerY) / 2;
-  bracketSvgPath(svg, `M ${first.right} ${first.centerY} H ${junctionX}`, bracketLineColor(firstPlayer.dataset.slotState));
-  bracketSvgPath(svg, `M ${second.left} ${second.centerY} H ${junctionX}`, bracketLineColor(secondPlayer.dataset.slotState));
   return {x: junctionX, y: junctionY};
 }
 
 function drawKnockoutConnections(root) {
   const canvas = root.querySelector('.knockout-canvas');
-  const svg = root.querySelector('.bracket-lines');
-  if (!canvas || !svg) return;
+  if (!canvas) return;
   const canvasRect = canvas.getBoundingClientRect();
-  const width = Math.max(canvas.scrollWidth, canvas.clientWidth);
-  const height = Math.max(canvas.scrollHeight, canvas.clientHeight);
-  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
-  svg.setAttribute('width', String(width));
-  svg.setAttribute('height', String(height));
-  svg.replaceChildren();
+  root.querySelectorAll('.bracket-match-advance-lines').forEach(layer => layer.replaceChildren());
 
   const junctions = new Map();
   root.querySelectorAll('.bracket-match').forEach(matchNode => {
-    const junction = drawMatchConnector(svg, matchNode, canvasRect);
+    const junction = drawMatchConnector(matchNode, canvasRect);
     if (junction && matchNode.dataset.bracketNode) {
       junctions.set(matchNode.dataset.bracketNode, junction);
     }
@@ -305,26 +383,15 @@ function drawKnockoutConnections(root) {
     const sourceNodeId = sourceNode.dataset.bracketNode || '';
     const sourceJunction = junctions.get(sourceNode.dataset.bracketNode);
     const targetNode = [...root.querySelectorAll(`.bracket-match[data-round-number="${round + 1}"]`)]
-      .find(node => (
-        node.dataset.sourceNode1 === sourceNodeId
-        || node.dataset.sourceNode2 === sourceNodeId
-      ));
+      .find(node => bracketTargetSide(node, sourceNodeId));
     if (!sourceJunction || !targetNode) return;
-    const targetSide = targetNode.dataset.sourceNode1 === sourceNodeId ? 1 : 2;
+    const targetSide = bracketTargetSide(targetNode, sourceNodeId);
+    if (!targetSide) return;
     const targetPhoto = targetNode.querySelector(`.bracket-player[data-side="${targetSide}"] .bracket-photo`);
     if (!targetPhoto) return;
     const target = bracketPhotoPoint(targetPhoto, canvasRect, 'bottom');
-    const targetY = target.bottom;
-    const nodeStatus = sourceNode.dataset.nodeStatus || 'pending';
-    const outputColor = nodeStatus === 'finished' || nodeStatus === 'bye'
-      ? bracketLineColor('winner')
-      : nodeStatus === 'pending' ? bracketLineColor('pending') : bracketLineColor('unknown');
-    bracketSvgPath(
-      svg,
-      `M ${sourceJunction.x} ${sourceJunction.y} V ${targetY}`,
-      outputColor,
-      4,
-    );
+    const outputColor = bracketAdvanceLineColor(sourceNode);
+    drawAdvanceLine(sourceNode, sourceJunction, target, canvasRect, outputColor);
   });
 }
 
