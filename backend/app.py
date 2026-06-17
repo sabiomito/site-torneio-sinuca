@@ -2414,18 +2414,11 @@ def validate_bracket_slots(bracket, slots, players):
         if item.get("player_id")
     }
 
-    if bracket_kind(bracket) == "division":
-        expected = set(source_by_id)
-        if set(selected) != expected:
-            raise ValueError("Use exatamente os classificados da divisao, sem repetir jogador e mantendo as folgas vazias.")
-        allowed = source_by_id
-    else:
-        expected_count = normalize_int(bracket.get("participant_count"), 0, 2)
-        if len(selected) != expected_count:
-            raise ValueError(f"Selecione exatamente {expected_count} competidor(es) para esta chave.")
-        allowed = player_by_id
+    expected_count = normalize_int(bracket.get("participant_count"), 0, 2)
+    if len(selected) != expected_count:
+        raise ValueError(f"Selecione exatamente {expected_count} competidor(es) para esta chave.")
 
-    invalid = [player_id for player_id in selected if player_id not in allowed and player_id not in player_by_id]
+    invalid = [player_id for player_id in selected if player_id not in player_by_id]
     if invalid:
         raise ValueError("O chaveamento contem competidor que nao existe mais.")
 

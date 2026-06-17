@@ -124,6 +124,35 @@ def test_save_division_bracket_persists_manual_structure(monkeypatch):
     assert {item["player_id"] for item in saved["qualifiers"]} == {"p1", "p2", "p3", "p4"}
 
 
+def test_save_division_bracket_accepts_any_registered_player(monkeypatch):
+    bracket = division_bracket()
+    saved = {}
+    players = [
+        *[player(f"p{index}", f"Jogador {index}") for index in range(1, 5)],
+        player("p5", "Convidado", division=2, chave="Z"),
+    ]
+    monkeypatch.setattr(app, "get_brackets", lambda: [bracket])
+    monkeypatch.setattr(app, "get_rounds", lambda: [])
+    monkeypatch.setattr(app, "get_matches", lambda: [])
+    monkeypatch.setattr(app, "get_results", lambda: [])
+    monkeypatch.setattr(app, "get_config", base_config)
+    monkeypatch.setattr(app, "get_players", lambda: players)
+    monkeypatch.setattr(app, "get_tiebreak_decisions", lambda: [])
+    monkeypatch.setattr(app, "division_group_phase_complete", lambda *args: True)
+    monkeypatch.setattr(app, "put_item", lambda item: saved.update(item))
+
+    app.save_bracket_structure({
+        "bracket_id": "bracket_division_1",
+        "slots": ["p2", "p5", "p1", "p3"],
+    })
+
+    assert saved["slots"] == ["p2", "p5", "p1", "p3"]
+    guest = next(item for item in saved["qualifiers"] if item["player_id"] == "p5")
+    assert guest["name"] == "Convidado"
+    assert guest["division"] == 2
+    assert guest["chave"] == "Z"
+
+
 def test_delete_custom_bracket_is_blocked_when_round_exists(monkeypatch):
     bracket = custom_bracket()
     monkeypatch.setattr(app, "get_brackets", lambda: [bracket])

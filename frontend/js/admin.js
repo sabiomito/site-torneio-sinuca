@@ -612,8 +612,7 @@ function bracketEditorBlocked(bracket) {
 }
 
 function bracketEditorPlayerOptions(bracket, selectedId = '') {
-  const custom = bracket?.bracket_kind === 'custom';
-  const sourcePlayers = custom ? (adminState.players || []) : (bracket?.qualifiers || []);
+  const sourcePlayers = adminState.players || [];
   const players = [...sourcePlayers].sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'pt-BR'));
   if (selectedId && !players.some(player => String(player.player_id || '') === String(selectedId))) {
     players.push({player_id: selectedId, name: `Competidor ${selectedId}`});
