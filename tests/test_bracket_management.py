@@ -75,6 +75,28 @@ def custom_bracket():
     }
 
 
+def visual_order_bracket():
+    qualifiers = [
+        {"player_id": f"p{index}", "name": f"Jogador {index}", "division": 1, "chave": "A", "seed": index, "group_rank": index}
+        for index in range(1, 9)
+    ]
+    return {
+        "pk": "BRACKET",
+        "sk": "CUSTOM#bracket_visual",
+        "type": "BRACKET",
+        "bracket_id": "bracket_visual",
+        "bracket_kind": "custom",
+        "division": 1002,
+        "display_name": "Visual",
+        "manual_override": True,
+        "participant_count": 8,
+        "bracket_size": 8,
+        "qualifiers": qualifiers,
+        "slots": ["p1", "p8", "p2", "p7", "p3", "p6", "p4", "p5"],
+        "created_at": "2026-01-01T00:00:00Z",
+    }
+
+
 def base_config():
     return {
         "division_count": 1,
@@ -220,3 +242,34 @@ def test_create_knockout_rounds_uses_custom_bracket_and_display_name(monkeypatch
     assert result["matches"][0]["bracket_display_name"] == "Repescagem"
     assert result["matches"][0]["player1_id"] == "p2"
     assert result["matches"][0]["player2_id"] == "p3"
+
+
+def test_create_knockout_rounds_orders_games_by_visual_layout(monkeypatch):
+    bracket = visual_order_bracket()
+    players = [player(f"p{index}", f"Jogador {index}") for index in range(1, 9)]
+    ids = iter(["round_visual", "match_1", "match_2", "match_3", "match_4"])
+    monkeypatch.setattr(app, "get_config", base_config)
+    monkeypatch.setattr(app, "get_brackets", lambda: [bracket])
+    monkeypatch.setattr(app, "get_players", lambda: players)
+    monkeypatch.setattr(app, "get_matches", lambda: [])
+    monkeypatch.setattr(app, "get_results", lambda: [])
+    monkeypatch.setattr(app, "get_tiebreak_decisions", lambda: [])
+    monkeypatch.setattr(app, "put_item", lambda item: None)
+    monkeypatch.setattr(app, "make_id", lambda prefix: next(ids))
+
+    result = app.create_knockout_rounds({
+        "bracket_id": "bracket_visual",
+        "name": "Bar Central",
+        "date": "2026-06-20",
+        "start_time": "09:00",
+    })
+
+    assert [
+        (match["bracket_node_id"], match["player1_id"], match["player2_id"])
+        for match in result["matches"]
+    ] == [
+        ("R1M0", "p1", "p8"),
+        ("R1M3", "p4", "p5"),
+        ("R1M1", "p2", "p7"),
+        ("R1M2", "p3", "p6"),
+    ]

@@ -2624,6 +2624,7 @@ def create_knockout_rounds(data):
                     "player1": player1,
                     "player2": player2,
                     "kind": "main",
+                    "layout_index": normalize_int(node.get("layout_index"), node.get("node_index", 0)),
                 })
 
     third = view.get("third_place") or {}
@@ -2635,6 +2636,7 @@ def create_knockout_rounds(data):
             "player1": third["player1"],
             "player2": third["player2"],
             "kind": "third_place",
+            "layout_index": 0,
         })
 
     if not creatable:
@@ -2645,6 +2647,7 @@ def create_knockout_rounds(data):
     creatable.sort(key=lambda item: (
         item["round_number"],
         0 if item["kind"] == "third_place" else 1,
+        normalize_int(item.get("layout_index"), 0),
         item["node_id"],
     ))
     place_id = "round_place_" + hashlib.sha1(name.lower().encode("utf-8")).hexdigest()[:10]

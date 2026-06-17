@@ -732,13 +732,17 @@ function renderBracketEditor() {
   const blocked = bracketEditorBlocked(bracket);
   const waitingPoints = bracket.bracket_kind !== 'custom' && bracket.group_phase_complete === false;
   const disabled = blocked || waitingPoints;
-  const firstRoundNodes = bracket.rounds?.[0]?.nodes || [];
+  const firstRoundNodes = [...(bracket.rounds?.[0]?.nodes || [])].sort((first, second) => (
+    Number(first.layout_index ?? first.node_index ?? 0) - Number(second.layout_index ?? second.node_index ?? 0)
+    || Number(first.node_index ?? 0) - Number(second.node_index ?? 0)
+  ));
   games.innerHTML = `<h3>${escapeHtml(bracketDisplayNameAdmin(bracket))}</h3>
     <p class="muted">${Number(bracket.participant_count || 0)} competidor(es) · ${Number(firstRoundNodes.length || 0)} jogo(s) na primeira fase.</p>
     <div class="manual-pair-list">${firstRoundNodes.map((node, index) => {
       const left = node.player1?.player?.player_id || '';
       const right = node.player2?.player?.player_id || '';
-      const leftSlot = index * 2;
+      const nodeIndex = Number(node.node_index ?? index);
+      const leftSlot = nodeIndex * 2;
       const rightSlot = leftSlot + 1;
       return `<div class="manual-game-row bracket-editor-game-row" data-game-index="${index}">
         <span class="manual-game-label">Jogo ${index + 1}</span>
