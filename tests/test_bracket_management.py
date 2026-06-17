@@ -97,6 +97,30 @@ def visual_order_bracket():
     }
 
 
+def single_group_qualifiers(count):
+    return [
+        {
+            "player_id": f"p{rank}",
+            "name": f"Jogador {rank}",
+            "division": 1,
+            "chave": "A",
+            "group_rank": rank,
+            "seed": rank,
+        }
+        for rank in range(1, count + 1)
+    ]
+
+
+def layout_order_ids(view, round_number):
+    return [
+        node["node_id"]
+        for node in sorted(
+            view["rounds"][round_number - 1]["nodes"],
+            key=lambda item: item["layout_index"],
+        )
+    ]
+
+
 def base_config():
     return {
         "division_count": 1,
@@ -173,6 +197,51 @@ def test_save_division_bracket_accepts_any_registered_player(monkeypatch):
     assert guest["name"] == "Convidado"
     assert guest["division"] == 2
     assert guest["chave"] == "Z"
+
+
+def test_save_division_bracket_keeps_visual_order_when_selected_players_change_chaves(monkeypatch):
+    qualifiers = single_group_qualifiers(16)
+    bracket_size, slots = app.bracket_slots_for_qualifiers(qualifiers)
+    bracket = {
+        "pk": "BRACKET",
+        "sk": "DIVISION#1",
+        "type": "BRACKET",
+        "bracket_id": "bracket_division_1",
+        "bracket_kind": "division",
+        "division": 1,
+        "participant_count": 16,
+        "bracket_size": bracket_size,
+        "qualifiers": qualifiers,
+        "slots": slots,
+        "created_at": "2026-01-01T00:00:00Z",
+    }
+    players = [
+        *[player(f"p{index}", f"Jogador {index}") for index in range(1, 17)],
+        player("p17", "Convidado", division=2, chave="Z"),
+    ]
+    original_order = layout_order_ids(app.build_bracket_view(bracket, players, []), 1)
+    saved = {}
+    edited_slots = slots[:]
+    edited_slots[-1] = "p17"
+    monkeypatch.setattr(app, "get_brackets", lambda: [bracket])
+    monkeypatch.setattr(app, "get_rounds", lambda: [])
+    monkeypatch.setattr(app, "get_matches", lambda: [])
+    monkeypatch.setattr(app, "get_results", lambda: [])
+    monkeypatch.setattr(app, "get_config", base_config)
+    monkeypatch.setattr(app, "get_players", lambda: players)
+    monkeypatch.setattr(app, "get_tiebreak_decisions", lambda: [])
+    monkeypatch.setattr(app, "division_group_phase_complete", lambda *args: True)
+    monkeypatch.setattr(app, "put_item", lambda item: saved.update(item))
+
+    app.save_bracket_structure({
+        "bracket_id": "bracket_division_1",
+        "slots": edited_slots,
+    })
+    new_order = layout_order_ids(app.build_bracket_view(saved, players, []), 1)
+
+    assert saved["source_pair_mode"] == "single"
+    assert saved["manual_override"] is True
+    assert new_order == original_order
 
 
 def test_delete_custom_bracket_is_blocked_when_round_exists(monkeypatch):

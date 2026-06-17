@@ -1780,6 +1780,18 @@ def bracket_display_name(bracket):
     return str((bracket or {}).get("display_name") or "").strip()
 
 
+def bracket_source_pair_mode(bracket):
+    mode = str((bracket or {}).get("source_pair_mode") or "").strip().lower()
+    if mode in {"single", "mixed"}:
+        return mode
+    chaves = {
+        normalize_chave(item.get("chave"))
+        for item in (bracket or {}).get("qualifiers", [])
+        if item.get("player_id")
+    }
+    return "single" if len(chaves) == 1 else "mixed"
+
+
 def get_bracket_by_id(bracket_id):
     bracket_id = str(bracket_id or "")
     if not bracket_id:
@@ -1952,6 +1964,11 @@ def build_bracket_spec(division, standings):
         "division": normalize_int(division, 1),
         "display_name": "",
         "manual_override": False,
+        "source_pair_mode": "single" if len({
+            normalize_chave(item.get("chave"))
+            for item in qualifiers
+            if item.get("player_id")
+        }) == 1 else "mixed",
         "participant_count": len(qualifiers),
         "bracket_size": bracket_size,
         "qualifiers": [{
@@ -2011,12 +2028,7 @@ def standard_seed_order(size):
 
 
 def bracket_round_source_pairs(bracket, target_round_number, source_count):
-    chaves = {
-        normalize_chave(item.get("chave"))
-        for item in bracket.get("qualifiers", [])
-        if item.get("player_id")
-    }
-    if len(chaves) == 1:
+    if bracket_source_pair_mode(bracket) == "single":
         if target_round_number == 2:
             order = standard_seed_order(source_count)
             return [
@@ -2085,6 +2097,9 @@ def bracket_layout_indices(bracket, bracket_size):
 
 def bracket_first_round_node_order(bracket):
     bracket_size = next_power_of_two(bracket.get("bracket_size") or len(bracket.get("slots", [])))
+    first_round_nodes = bracket_size // 2
+    if bool(bracket.get("manual_override")):
+        return list(range(first_round_nodes))
     slots = [str(value or "") for value in bracket.get("slots", [])]
     slots.extend([""] * max(0, bracket_size - len(slots)))
     qualifiers = {
@@ -2097,7 +2112,7 @@ def bracket_first_round_node_order(bracket):
         for item in qualifiers.values()
     })
     entries = []
-    for node_index in range(bracket_size // 2):
+    for node_index in range(first_round_nodes):
         player_ids = slots[node_index * 2:node_index * 2 + 2]
         entry = [qualifiers[player_id] for player_id in player_ids if player_id in qualifiers]
         entries.append((node_index, entry))
@@ -2278,6 +2293,7 @@ def build_bracket_view(bracket, players, matches, group_phase_complete=True, is_
         "division": normalize_int(bracket.get("division"), 1),
         "display_name": bracket_display_name(bracket),
         "manual_override": bool(bracket.get("manual_override")),
+        "source_pair_mode": bracket_source_pair_mode(bracket),
         "participant_count": normalize_int(bracket.get("participant_count"), len(bracket.get("qualifiers", []))),
         "bracket_size": bracket_size,
         "total_rounds": total_rounds,
@@ -2443,6 +2459,7 @@ def save_bracket_structure(data):
         raise ValueError("Finalize todos os jogos da fase de pontos dessa divisao antes de editar o chaveamento.")
 
     bracket_size = next_power_of_two(bracket.get("bracket_size") or len(bracket.get("slots", [])))
+    source_pair_mode = bracket_source_pair_mode(bracket)
     slots = normalize_bracket_slots_payload(data.get("slots"), bracket_size)
     qualifiers = validate_bracket_slots(bracket, slots, players)
     bracket["slots"] = slots
@@ -2451,6 +2468,7 @@ def save_bracket_structure(data):
     bracket["bracket_size"] = bracket_size
     bracket["manual_override"] = True
     bracket["bracket_kind"] = bracket_kind(bracket)
+    bracket["source_pair_mode"] = source_pair_mode
     bracket["created_at"] = bracket.get("created_at") or now_iso()
     put_item(bracket)
     return {"bracket": bracket}
@@ -2498,6 +2516,7 @@ def create_custom_bracket(data):
         "division": next_custom_bracket_division(config),
         "display_name": name,
         "manual_override": True,
+        "source_pair_mode": "mixed",
         "participant_count": participant_count,
         "bracket_size": bracket_size,
         "qualifiers": [],
