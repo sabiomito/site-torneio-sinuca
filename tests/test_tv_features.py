@@ -52,14 +52,14 @@ def test_tv_config_defaults_and_limits():
         "bracket_seconds": 14,
         "bracket_game_filter": "pending",
         "sponsor_seconds": 99999,
-        "match_seconds": 8,
+        "match_seconds": -1,
         "filters": {"status": "invalid"},
     })
-    assert normalized["table_seconds"] == 1
+    assert normalized["table_seconds"] == 0
     assert normalized["bracket_seconds"] == 14
     assert normalized["bracket_game_filter"] == "pending"
     assert normalized["sponsor_seconds"] == 3600
-    assert normalized["match_seconds"] == 8
+    assert normalized["match_seconds"] == 0
     assert normalized["filters"]["status"] == ""
     assert app.normalize_tv_config({"bracket_game_filter": "invalid"})["bracket_game_filter"] == "all"
     assert app.normalize_tv_config({}, "pending")["bracket_game_filter"] == "pending"

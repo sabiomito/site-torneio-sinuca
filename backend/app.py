@@ -301,11 +301,11 @@ def normalize_tv_config(raw=None, bracket_game_filter_fallback="all"):
     if bracket_game_filter not in {"all", "pending"}:
         bracket_game_filter = "all"
     return {
-        "table_seconds": normalize_int(raw.get("table_seconds"), 60, 1, 3600),
-        "bracket_seconds": normalize_int(raw.get("bracket_seconds"), 60, 1, 3600),
+        "table_seconds": normalize_int(raw.get("table_seconds"), 60, 0, 3600),
+        "bracket_seconds": normalize_int(raw.get("bracket_seconds"), 60, 0, 3600),
         "bracket_game_filter": bracket_game_filter,
-        "sponsor_seconds": normalize_int(raw.get("sponsor_seconds"), 30, 1, 3600),
-        "match_seconds": normalize_int(raw.get("match_seconds"), 5, 1, 3600),
+        "sponsor_seconds": normalize_int(raw.get("sponsor_seconds"), 30, 0, 3600),
+        "match_seconds": normalize_int(raw.get("match_seconds"), 5, 0, 3600),
         "filters": filters,
     }
 

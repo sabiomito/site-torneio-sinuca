@@ -44,13 +44,19 @@ function tvConfig() {
   const saved = telaoState?.config?.tv_config || {};
   const savedBracketFilter = saved.bracket_game_filter || telaoState?.config?.tv_bracket_game_filter;
   return {
-    table_seconds: Math.max(1, Number(saved.table_seconds || DEFAULT_TV_CONFIG.table_seconds)),
-    bracket_seconds: Math.max(1, Number(saved.bracket_seconds || DEFAULT_TV_CONFIG.bracket_seconds)),
+    table_seconds: tvSeconds(saved.table_seconds, DEFAULT_TV_CONFIG.table_seconds),
+    bracket_seconds: tvSeconds(saved.bracket_seconds, DEFAULT_TV_CONFIG.bracket_seconds),
     bracket_game_filter: savedBracketFilter === 'pending' ? 'pending' : 'all',
-    sponsor_seconds: Math.max(1, Number(saved.sponsor_seconds || DEFAULT_TV_CONFIG.sponsor_seconds)),
-    match_seconds: Math.max(1, Number(saved.match_seconds || DEFAULT_TV_CONFIG.match_seconds)),
+    sponsor_seconds: tvSeconds(saved.sponsor_seconds, DEFAULT_TV_CONFIG.sponsor_seconds),
+    match_seconds: tvSeconds(saved.match_seconds, DEFAULT_TV_CONFIG.match_seconds),
     filters: saved.filters || {},
   };
+}
+
+function tvSeconds(value, fallback) {
+  if (value === undefined || value === null || value === '') return fallback;
+  const seconds = Number(value);
+  return Number.isFinite(seconds) ? Math.max(0, seconds) : fallback;
 }
 
 function cycleMatches() {
@@ -78,6 +84,27 @@ function gatherStandingsTables(state) {
     }));
   }
   return cards.filter(card => card.rows.length);
+}
+
+function hasTablePhase() {
+  return tvConfig().table_seconds > 0 && gatherStandingsTables(telaoState).length > 0;
+}
+
+function hasBracketPhase() {
+  return tvConfig().bracket_seconds > 0 && cycleBrackets().length > 0;
+}
+
+function hasSponsorPhase() {
+  return tvConfig().sponsor_seconds > 0
+    && (sponsorImages('rect').length > 0 || sponsorImages('square').length > 0);
+}
+
+function hasMatchPhase() {
+  return tvConfig().match_seconds > 0 && cycleMatches().length > 0;
+}
+
+function hasAnyCyclePhase() {
+  return hasTablePhase() || hasBracketPhase() || hasSponsorPhase() || hasMatchPhase();
 }
 
 function sponsorImages(shape) {
@@ -256,33 +283,43 @@ function renderMatch(match) {
 
 function renderCurrentMode() {
   if (!telaoState) return;
+  if (!hasAnyCyclePhase()) {
+    renderNoActiveCycle();
+    return;
+  }
   if (currentMode === 'sponsors') {
-    renderSponsors();
+    if (hasSponsorPhase()) renderSponsors();
+    else startTablesPhase();
   } else if (currentMode === 'brackets') {
     const brackets = cycleBrackets();
-    if (brackets.length) {
+    if (hasBracketPhase() && brackets.length) {
       currentBracketIndex = Math.min(currentBracketIndex, brackets.length - 1);
       renderBracket(brackets[currentBracketIndex]);
     } else {
-      renderTables();
+      startTablesPhase();
     }
   } else if (currentMode === 'matches') {
     const matches = cycleMatches();
-    if (matches.length) {
+    if (hasMatchPhase() && matches.length) {
       currentMatchIndex = Math.min(currentMatchIndex, matches.length - 1);
       renderMatch(matches[currentMatchIndex]);
     } else {
-      renderTables();
+      startTablesPhase();
     }
-  } else {
+  } else if (currentMode === 'tables' && hasTablePhase()) {
     renderTables();
+  } else {
+    startTablesPhase();
   }
 }
 
 function updateCountdown() {
   const element = document.getElementById('telao-countdown');
   let label = 'Placar';
-  if (currentMode === 'sponsors') {
+  if (currentMode === 'empty') {
+    element.textContent = 'Ciclo pausado — configure um tempo maior que 0';
+    return;
+  } else if (currentMode === 'sponsors') {
     label = 'Patrocinadores';
   } else if (currentMode === 'brackets') {
     const brackets = cycleBrackets();
@@ -301,9 +338,28 @@ function updateCountdown() {
   element.textContent = `${label} — Próxima visualização em ${seconds}s`;
 }
 
+function renderNoActiveCycle() {
+  clearTimeout(cycleTimer);
+  clearInterval(countdownTimer);
+  phaseEndsAt = 0;
+  currentMode = 'empty';
+  const grid = document.getElementById('telao-grid');
+  grid.className = 'telao-grid';
+  grid.style.gridTemplateColumns = '';
+  grid.innerHTML = '<section class="card empty"><h2>Ciclo do telao pausado</h2><p>Configure pelo menos um tempo maior que 0 para exibir itens no telao.</p></section>';
+  updateCountdown();
+}
+
 function schedulePhase(seconds, callback) {
   clearTimeout(cycleTimer);
   clearInterval(countdownTimer);
+  seconds = Math.max(0, Number(seconds || 0));
+  if (seconds <= 0) {
+    phaseEndsAt = 0;
+    updateCountdown();
+    cycleTimer = setTimeout(callback, 0);
+    return;
+  }
   phaseEndsAt = Date.now() + seconds * 1000;
   updateCountdown();
   countdownTimer = setInterval(updateCountdown, 250);
@@ -315,13 +371,25 @@ function schedulePhase(seconds, callback) {
 }
 
 function startTablesPhase() {
+  if (!hasAnyCyclePhase()) {
+    renderNoActiveCycle();
+    return;
+  }
+  if (!hasTablePhase()) {
+    startBracketsPhase();
+    return;
+  }
   renderTables();
   schedulePhase(tvConfig().table_seconds, startBracketsPhase);
 }
 
 function startBracketsPhase() {
+  if (!hasAnyCyclePhase()) {
+    renderNoActiveCycle();
+    return;
+  }
   const brackets = cycleBrackets();
-  if (!brackets.length) {
+  if (!hasBracketPhase() || !brackets.length) {
     startSponsorsPhase();
     return;
   }
@@ -331,7 +399,7 @@ function startBracketsPhase() {
 
 function showCurrentBracket() {
   const brackets = cycleBrackets();
-  if (!brackets.length || currentBracketIndex >= brackets.length) {
+  if (!hasBracketPhase() || !brackets.length || currentBracketIndex >= brackets.length) {
     startSponsorsPhase();
     return;
   }
@@ -343,7 +411,11 @@ function showCurrentBracket() {
 }
 
 function startSponsorsPhase() {
-  if (!sponsorImages('rect').length && !sponsorImages('square').length) {
+  if (!hasAnyCyclePhase()) {
+    renderNoActiveCycle();
+    return;
+  }
+  if (!hasSponsorPhase()) {
     startMatchesPhase();
     return;
   }
@@ -354,7 +426,11 @@ function startSponsorsPhase() {
 
 function startMatchesPhase() {
   const matches = cycleMatches();
-  if (!matches.length) {
+  if (!hasAnyCyclePhase()) {
+    renderNoActiveCycle();
+    return;
+  }
+  if (!hasMatchPhase() || !matches.length) {
     startTablesPhase();
     return;
   }
@@ -364,7 +440,7 @@ function startMatchesPhase() {
 
 function showCurrentMatch() {
   const matches = cycleMatches();
-  if (!matches.length || currentMatchIndex >= matches.length) {
+  if (!hasMatchPhase() || !matches.length || currentMatchIndex >= matches.length) {
     startTablesPhase();
     return;
   }

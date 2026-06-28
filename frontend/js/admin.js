@@ -195,12 +195,12 @@ function renderTvConfig() {
     filters: {},
   };
   const filters = tv.filters || {};
-  document.getElementById('tv-table-seconds').value = tv.table_seconds || 60;
-  document.getElementById('tv-bracket-seconds').value = tv.bracket_seconds || 60;
+  document.getElementById('tv-table-seconds').value = tv.table_seconds ?? 60;
+  document.getElementById('tv-bracket-seconds').value = tv.bracket_seconds ?? 60;
   const savedBracketFilter = tv.bracket_game_filter || adminState.config.tv_bracket_game_filter;
   document.getElementById('tv-bracket-game-filter').value = savedBracketFilter === 'pending' ? 'pending' : 'all';
-  document.getElementById('tv-sponsor-seconds').value = tv.sponsor_seconds || 30;
-  document.getElementById('tv-match-seconds').value = tv.match_seconds || 5;
+  document.getElementById('tv-sponsor-seconds').value = tv.sponsor_seconds ?? 30;
+  document.getElementById('tv-match-seconds').value = tv.match_seconds ?? 5;
   fillSelect(document.getElementById('tv-filter-date'), adminState.dates, 'date', d => fmtDate(d.date), 'Todas');
   fillSelect(document.getElementById('tv-filter-place'), adminState.places, 'place_id', 'name', 'Todos');
   fillSelect(document.getElementById('tv-filter-player'), adminState.players, 'player_id', p => `${p.name} — ${divisionName(p.division)} / Chave ${normalizeChave(p.chave)}`, 'Todos');

@@ -1,4 +1,6 @@
 import os
+import re
+from urllib.parse import quote
 
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
@@ -59,6 +61,27 @@ def admin_state(driver):
     """
     result = driver.execute_async_script(script)
     return result["data"] if result["ok"] else None
+
+
+def assert_visible_box(driver, element, *, min_width=1, min_height=1):
+    assert element.is_displayed()
+    rect = element.rect
+    assert rect["width"] >= min_width
+    assert rect["height"] >= min_height
+    style = driver.execute_script(
+        """
+        const style = getComputedStyle(arguments[0]);
+        return {
+          display: style.display,
+          visibility: style.visibility,
+          opacity: style.opacity,
+        };
+        """,
+        element,
+    )
+    assert style["display"] != "none"
+    assert style["visibility"] == "visible"
+    assert float(style["opacity"] or 1) > 0
 
 
 def test_admin_flow_creates_round_and_public_score(driver):
@@ -151,6 +174,54 @@ def test_admin_flow_creates_round_and_public_score(driver):
     wait(driver).until(lambda browser: len(browser.find_elements(By.CSS_SELECTOR, "#matches .match-row")) == 1)
     assert "0 x 0" in driver.find_element(By.ID, "matches").text
     assert "Derrota para ambos" in driver.find_element(By.ID, "matches").text
+    public_html = driver.page_source
+    assert 'class="match-row finished"' in public_html
+    assert "Teste Alpha" in public_html
+    assert "Teste Beta" in public_html
+    assert re.search(r">\s*0</span>\s*x\s*<span[^>]*>\s*0\s*<", public_html)
+    assert "Derrota para ambos" in public_html
+    match_row = driver.find_element(By.CSS_SELECTOR, "#matches .match-row.finished")
+    assert_visible_box(driver, match_row, min_width=250, min_height=30)
+    assert_visible_box(driver, match_row.find_element(By.CSS_SELECTOR, ".pill"), min_width=40, min_height=12)
+    assert_visible_box(driver, match_row.find_element(By.CSS_SELECTOR, ".score"), min_width=40, min_height=12)
+    assert_visible_box(driver, match_row.find_element(By.CSS_SELECTOR, ".double-loss-note"), min_width=40, min_height=12)
+
+    driver.execute_script(
+        """
+        window.__printedHtml = '';
+        window.open = () => ({
+          document: {
+            open() {},
+            write(html) { window.__printedHtml = html; },
+            close() {}
+          }
+        });
+        """
+    )
+    driver.find_element(By.ID, "print-filtered-matches").click()
+    printed_html = wait(driver).until(lambda browser: browser.execute_script("return window.__printedHtml"))
+    assert "<table>" in printed_html
+    assert "Teste Alpha" in printed_html
+    assert "Teste Beta" in printed_html
+    assert "09:00" in printed_html
+    assert "0 x 0 (derrota para ambos)" in printed_html
+
+    printable_html = re.sub(r"<script>.*?</script>", "", printed_html, flags=re.DOTALL)
+    original_window = driver.current_window_handle
+    driver.switch_to.new_window("tab")
+    try:
+        driver.get("data:text/html;charset=utf-8," + quote(printable_html))
+        print_page = wait(driver).until(EC.visibility_of_element_located((By.CSS_SELECTOR, ".print-page")))
+        print_table = driver.find_element(By.CSS_SELECTOR, ".print-page table")
+        result_cell = driver.find_element(By.CSS_SELECTOR, ".print-page .col-result")
+        assert_visible_box(driver, print_page, min_width=300, min_height=400)
+        assert_visible_box(driver, print_table, min_width=300, min_height=60)
+        assert_visible_box(driver, result_cell, min_width=20, min_height=10)
+        assert "0 x 0 (derrota para ambos)" in driver.find_element(By.TAG_NAME, "body").text
+    finally:
+        driver.close()
+        driver.switch_to.window(original_window)
+
     standings_text = driver.find_element(By.ID, "standings").text
     assert "Teste Beta" in standings_text
 
