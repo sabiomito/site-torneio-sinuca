@@ -1,5 +1,6 @@
 let adminState = null;
 let selectedBracketEditorId = '';
+let scoreOverlayState = null;
 
 const els = {
   loginCard: document.getElementById('login-card'),
@@ -123,6 +124,8 @@ async function login(password) {
 async function loadAdminState() {
   try {
     adminState = await adminFetch('/admin/state');
+    scoreOverlayState = await apiFetch('/score-overlay/state');
+    adminState.score_overlay = scoreOverlayState;
     els.loginCard.classList.add('hidden');
     els.adminPanel.classList.remove('hidden');
     els.logout.classList.remove('hidden');
@@ -223,6 +226,79 @@ function renderTvConfig() {
   });
 }
 
+function scoreOverlayDescriptionForMatch(match) {
+  if (!match) return '';
+  if (match.phase === 'knockout') {
+    return matchStageLabel(match);
+  }
+  return 'Fase de grupos';
+}
+
+function scoreOverlayMatchLabel(match) {
+  const score = match.is_finished
+    ? `${Number(match.balls_p1 || 0)} x ${Number(match.balls_p2 || 0)}`
+    : 'sem resultado';
+  return `${scoreOverlayDescriptionForMatch(match)} - ${match.player1_name} x ${match.player2_name} (${score})`;
+}
+
+function scoreOverlayPlayerPreview(match, side) {
+  const playerId = match?.[`${side}_id`] || '';
+  const player = (adminState.players || []).find(item => item.player_id === playerId) || {};
+  const name = player.name || match?.[`${side}_name`] || (side === 'player1' ? 'Jogador 1' : 'Jogador 2');
+  return {
+    name,
+    photo_url: player.photo_url || '/img/entre-folhas-logo-transparent.png',
+    short_message: player.short_message || '',
+  };
+}
+
+function renderScoreOverlayPreview() {
+  const title = document.getElementById('score-overlay-title')?.value || '';
+  const matchId = document.getElementById('score-overlay-match')?.value || '';
+  const match = (adminState.matches || []).find(item => item.match_id === matchId);
+  const overlay = scoreOverlayState || adminState.score_overlay || {};
+  const player1 = match ? scoreOverlayPlayerPreview(match, 'player1') : overlay.player1;
+  const player2 = match ? scoreOverlayPlayerPreview(match, 'player2') : overlay.player2;
+  const score1 = match ? Number(match.balls_p1 || 0) : Number(overlay.score1 || 0);
+  const score2 = match ? Number(match.balls_p2 || 0) : Number(overlay.score2 || 0);
+  const description = match ? scoreOverlayDescriptionForMatch(match) : (overlay.description || '');
+  const hasPreviewMatch = Boolean(match || overlay.match_id);
+  document.getElementById('score-overlay-preview').innerHTML = `
+    <div class="score-admin-preview-card">
+      <div>
+        <span class="eyebrow">Preview</span>
+        <h3>${escapeHtml(title || 'Sem titulo')}</h3>
+        <p>${escapeHtml(description || 'Nenhuma partida selecionada.')}</p>
+      </div>
+      ${hasPreviewMatch ? `<div class="score-admin-preview-players">
+          <span>${escapeHtml(player1?.name || 'Jogador 1')}</span>
+          <strong>${score1} x ${score2}</strong>
+          <span>${escapeHtml(player2?.name || 'Jogador 2')}</span>
+        </div>` : ''}
+    </div>`;
+}
+
+function renderScoreOverlayConfig() {
+  const overlay = scoreOverlayState || adminState.score_overlay || {};
+  const titleInput = document.getElementById('score-overlay-title');
+  const matchSelect = document.getElementById('score-overlay-match');
+  if (!titleInput || !matchSelect) return;
+  titleInput.value = overlay.title || '';
+  matchSelect.innerHTML = '<option value="">Nenhuma partida</option>';
+  (adminState.matches || []).forEach(match => {
+    matchSelect.insertAdjacentHTML(
+      'beforeend',
+      `<option value="${escapeHtml(match.match_id)}">${escapeHtml(scoreOverlayMatchLabel(match))}</option>`
+    );
+  });
+  if ([...matchSelect.options].some(option => option.value === String(overlay.match_id || ''))) {
+    matchSelect.value = String(overlay.match_id || '');
+  }
+  titleInput.oninput = renderScoreOverlayPreview;
+  matchSelect.onchange = renderScoreOverlayPreview;
+  renderScoreOverlayPreview();
+}
+
 const ADMIN_MATCH_FILTER_IDS = [
   'admin-filter-date',
   'admin-filter-round',
@@ -271,6 +347,7 @@ function renderAll() {
   fillAllChavesFilter(document.getElementById('admin-filter-chave'), 'Todas');
   restoreAdminMatchFilters(preservedMatchFilters);
   renderTvConfig();
+  renderScoreOverlayConfig();
   renderRoundRequirements();
   renderTiebreaks();
   renderKnockoutStatus();
@@ -1051,6 +1128,8 @@ function renderAdminMatches() {
     const p2Win = match.winner_id === match.player2_id;
     const doubleLoss = Boolean(match.double_loss);
     const isKnockout = match.phase === 'knockout';
+    const scoreLabel = isKnockout ? 'Placar' : 'Bolas';
+    const scoreMax = isKnockout ? 999 : 7;
     return `<form class="result-form ${match.is_finished ? 'finished' : ''}" data-match-id="${escapeHtml(match.match_id)}">
       <div class="match-meta">${fmtDate(match.date)} · ${escapeHtml(match.time || '--:--')} até ${escapeHtml(match.end_time || '--:--')} · ${escapeHtml(match.place_name || 'Sem local')} · ${escapeHtml(adminDivisionLabel(match))} · ${escapeHtml(matchStageLabel(match))} ${match.round_deleted ? '· rodada excluída' : ''} ${match.is_finished ? '· finalizada' : ''} ${doubleLoss ? '· derrota para ambos' : ''}</div>
       <strong>${escapeHtml(match.player1_name)} x ${escapeHtml(match.player2_name)}</strong>
@@ -1063,11 +1142,11 @@ function renderAdminMatches() {
             ${isKnockout ? '' : `<option value="__double_loss__" ${doubleLoss ? 'selected' : ''}>Derrota para ambos (0 x 0)</option>`}
           </select>
         </label>
-        <label>Bolas ${escapeHtml(match.player1_name)}
-          <input type="number" name="balls_p1" min="0" max="7" value="${match.balls_p1 || 0}" ${doubleLoss ? 'disabled' : ''}>
+        <label>${scoreLabel} ${escapeHtml(match.player1_name)}
+          <input type="number" name="balls_p1" min="0" max="${scoreMax}" value="${match.balls_p1 || 0}" ${doubleLoss ? 'disabled' : ''}>
         </label>
-        <label>Bolas ${escapeHtml(match.player2_name)}
-          <input type="number" name="balls_p2" min="0" max="7" value="${match.balls_p2 || 0}" ${doubleLoss ? 'disabled' : ''}>
+        <label>${scoreLabel} ${escapeHtml(match.player2_name)}
+          <input type="number" name="balls_p2" min="0" max="${scoreMax}" value="${match.balls_p2 || 0}" ${doubleLoss ? 'disabled' : ''}>
         </label>
         <button type="submit">Salvar resultado</button>
         <button class="secondary" type="button" data-clear-result>Limpar</button>
@@ -1087,9 +1166,9 @@ function renderAdminMatches() {
       if (doubleLoss) {
         p1.value = 0;
         p2.value = 0;
-      } else if (winner.value === match.player1_id) {
+      } else if (match.phase !== 'knockout' && winner.value === match.player1_id) {
         p1.value = 7;
-      } else if (winner.value === match.player2_id) {
+      } else if (match.phase !== 'knockout' && winner.value === match.player2_id) {
         p2.value = 7;
       }
     });
@@ -1106,12 +1185,16 @@ function renderAdminMatches() {
         })
       });
       adminState = data.state || await adminFetch('/admin/state');
+      if (data.score_overlay) scoreOverlayState = data.score_overlay;
+      adminState.score_overlay = scoreOverlayState;
       preserveScroll(renderAll);
       toast('Resultado salvo.');
     });
     form.querySelector('[data-clear-result]').addEventListener('click', async () => {
       const data = await adminFetch('/admin/result', {method: 'POST', body: JSON.stringify({match_id: form.dataset.matchId, clear: true})});
       adminState = data.state || await adminFetch('/admin/state');
+      if (data.score_overlay) scoreOverlayState = data.score_overlay;
+      adminState.score_overlay = scoreOverlayState;
       preserveScroll(renderAll);
       toast('Resultado removido.');
     });
@@ -1183,6 +1266,25 @@ function setupEvents() {
     adminState = data.state || await adminFetch('/admin/state');
     preserveScroll(renderAll);
     toast('Configurações do telão salvas.');
+  });
+
+  document.getElementById('score-overlay-form').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    try {
+      const data = await adminFetch('/admin/score-overlay', {
+        method: 'POST',
+        body: JSON.stringify({
+          title: document.getElementById('score-overlay-title').value,
+          match_id: document.getElementById('score-overlay-match').value,
+        }),
+      });
+      scoreOverlayState = data.score_overlay || await apiFetch('/score-overlay/state');
+      adminState.score_overlay = scoreOverlayState;
+      preserveScroll(renderAll);
+      toast('Modo placar salvo.');
+    } catch (err) {
+      toast(err.message);
+    }
   });
 
   document.getElementById('player-division').addEventListener('change', ev => fillChaveSelect(document.getElementById('player-chave'), Number(ev.target.value || 1)));

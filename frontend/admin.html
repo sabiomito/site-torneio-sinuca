@@ -212,7 +212,7 @@
             <button class="secondary" id="admin-clear-filters" type="button">Limpar filtros</button>
             <button class="secondary print-button" id="admin-print-filtered-matches" type="button" title="Imprimir jogos filtrados">🖨️ Imprimir/PDF</button>
           </div>
-          <p class="muted">O vencedor recebe automaticamente 7 bolas. Em “Derrota para ambos”, o jogo termina em 0 x 0 sem pontos ou saldo. Resultados salvos ficam preservados mesmo se uma rodada for excluída.</p>
+          <p class="muted">Na fase de grupos, o vencedor recebe automaticamente 7 bolas. No chaveamento, informe o placar da serie. Em “Derrota para ambos”, o jogo termina em 0 x 0 sem pontos ou saldo. Resultados salvos ficam preservados mesmo se uma rodada for excluída.</p>
           <div id="admin-matches"></div>
         </div>
       </section>
@@ -296,6 +296,28 @@
             </div>
             <button id="save-tv-config" type="submit">Salvar configurações do telão</button>
           </form>
+        </div>
+      </section>
+
+      <section class="card collapsible closed" data-section="score-overlay">
+        <button class="collapse-title" type="button"><span>▾</span> Configuracoes do modo placar</button>
+        <div class="collapse-body">
+          <form id="score-overlay-form" class="stack-form">
+            <div class="grid-2">
+              <label>Titulo
+                <input type="text" id="score-overlay-title" maxlength="90">
+              </label>
+              <label>Partida exibida
+                <select id="score-overlay-match"></select>
+              </label>
+            </div>
+            <div id="score-overlay-preview" class="score-overlay-preview-admin"></div>
+            <div class="filter-actions-row">
+              <button type="submit">Salvar modo placar</button>
+              <a class="button secondary" href="/placar" target="_blank" rel="noopener">Abrir Modo Placar</a>
+            </div>
+          </form>
+          <p class="muted">A URL do modo placar usa um estado separado e leve. Quando o resultado da partida selecionada for salvo, esse estado sera atualizado automaticamente.</p>
         </div>
       </section>
 

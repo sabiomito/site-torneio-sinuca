@@ -115,6 +115,8 @@ Resources:
             request.uri = '/player.html';
           } else if (request.uri === '/telao' || request.uri === '/telao/' || request.uri === '/tv' || request.uri === '/tv/') {
             request.uri = '/telao.html';
+          } else if (request.uri === '/placar' || request.uri === '/placar/') {
+            request.uri = '/placar.html';
           } else if (request.uri === '/admin/jogador' || request.uri === '/admin/jogador/') {
             request.uri = '/admin-player.html';
           } else if (request.uri === '/admin/patrocinador' || request.uri === '/admin/patrocinador/') {

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Modo Placar - Campeonato de Sinuca</title>
+  <link rel="icon" type="image/png" href="/img/favicon.png">
+  <script>
+    if (new URLSearchParams(window.location.search).get('mode') === 'transparent') {
+      document.documentElement.classList.add('score-overlay-transparent-root');
+    }
+  </script>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="score-overlay-page">
+  <main class="score-overlay-shell">
+    <section id="score-overlay-root" class="score-overlay-card loading">
+      <div class="score-overlay-heading">
+        <h1>Carregando placar...</h1>
+      </div>
+    </section>
+  </main>
+
+  <script src="/config.js"></script>
+  <script src="/js/api.js"></script>
+  <script src="/js/score-overlay.js"></script>
+</body>
+</html>

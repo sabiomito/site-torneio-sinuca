@@ -284,6 +284,8 @@ def available_chaves_for_division(config, division):
 
 
 TV_FILTER_KEYS = ("date", "round", "place", "player", "division", "chave", "status")
+SCORE_OVERLAY_PK = "OVERLAY_SCORE"
+SCORE_OVERLAY_SK = "MAIN"
 
 
 def normalize_tv_config(raw=None, bracket_game_filter_fallback="all"):
@@ -550,6 +552,174 @@ def get_matches():
     for match in matches:
         match["double_loss"] = bool(match.get("double_loss", False))
     return sorted(matches, key=lambda m: (m.get("date") or "9999-99-99", m.get("time") or "99:99", m.get("place_name", ""), m.get("round_number", 999), m.get("chave", "A")))
+
+
+def format_date_br(value):
+    value = str(value or "")
+    parts = value.split("-")
+    if len(parts) == 3 and all(parts):
+        return f"{parts[2]}/{parts[1]}/{parts[0]}"
+    return value
+
+
+def score_overlay_default():
+    return {
+        "overlay_id": "main",
+        "title": "",
+        "match_id": "",
+        "description": "",
+        "version": 0,
+        "updated_at": "",
+        "status": "",
+        "is_finished": False,
+        "double_loss": False,
+        "winner_id": "",
+        "score1": 0,
+        "score2": 0,
+        "player1": {
+            "player_id": "",
+            "name": "Jogador 1",
+            "photo_url": "",
+            "short_message": "",
+            "profile_url": "",
+        },
+        "player2": {
+            "player_id": "",
+            "name": "Jogador 2",
+            "photo_url": "",
+            "short_message": "",
+            "profile_url": "",
+        },
+    }
+
+
+def clean_score_overlay(item):
+    base = score_overlay_default()
+    if not item:
+        return base
+    for key in [
+        "overlay_id", "title", "match_id", "description", "updated_at",
+        "winner_id",
+    ]:
+        base[key] = str(item[key]) if key in item and item[key] is not None else base[key]
+    base["version"] = normalize_int(item.get("version"), 0, 0)
+    base["is_finished"] = bool(item.get("is_finished"))
+    base["double_loss"] = bool(item.get("double_loss"))
+    base["score1"] = normalize_int(item.get("score1"), 0, 0, 999)
+    base["score2"] = normalize_int(item.get("score2"), 0, 0, 999)
+    for side in ("player1", "player2"):
+        player = dict(base[side])
+        player.update(item.get(side) or {})
+        player["short_message"] = str(player.get("short_message", "") or "")[:160]
+        base[side] = player
+    return base
+
+
+def get_score_overlay_item():
+    return get_item(SCORE_OVERLAY_PK, SCORE_OVERLAY_SK)
+
+
+def get_score_overlay_state():
+    return clean_score_overlay(get_score_overlay_item())
+
+
+def score_overlay_player_snapshot(match, side, players_by_id):
+    player_id = str(match.get(f"{side}_id") or "")
+    player = clean_public_player(players_by_id.get(player_id) or {})
+    name = player.get("name") or match.get(f"{side}_name") or ("Jogador 1" if side == "player1" else "Jogador 2")
+    return {
+        "player_id": player_id,
+        "name": name,
+        "photo_url": player.get("photo_url", ""),
+        "short_message": player.get("short_message", ""),
+        "profile_url": player.get("profile_url", player_profile_url({"name": name})),
+    }
+
+
+def score_overlay_match_description(match):
+    if match.get("phase") == "knockout":
+        return str(
+            match.get("stage_name")
+            or ("Disputa de 3o lugar" if match.get("bracket_match_kind") == "third_place" else "Chaveamento")
+        )
+    return "Fase de grupos"
+
+
+def divisionNameBackend(number):
+    return f"{normalize_int(number, 1)}a Divisao"
+
+
+def build_score_overlay_snapshot(title, match, current=None, players_by_id=None):
+    players_by_id = players_by_id or {
+        str(player.get("player_id")): player
+        for player in get_players()
+    }
+    current = current or {}
+    now = now_iso()
+    title_value = str(title if title is not None else current.get("title", "")).strip()[:90]
+    item = {
+        "pk": SCORE_OVERLAY_PK,
+        "sk": SCORE_OVERLAY_SK,
+        "type": "OVERLAY_SCORE",
+        "overlay_id": "main",
+        "title": title_value,
+        "match_id": str(match.get("match_id") or ""),
+        "description": score_overlay_match_description(match),
+        "version": normalize_int(current.get("version"), 0, 0) + 1,
+        "updated_at": now,
+        "status": "",
+        "is_finished": bool(match.get("is_finished")),
+        "double_loss": bool(match.get("double_loss")),
+        "winner_id": str(match.get("winner_id") or ""),
+        "score1": normalize_int(match.get("balls_p1"), 0, 0, 999),
+        "score2": normalize_int(match.get("balls_p2"), 0, 0, 999),
+        "player1": score_overlay_player_snapshot(match, "player1", players_by_id),
+        "player2": score_overlay_player_snapshot(match, "player2", players_by_id),
+    }
+    return item
+
+
+def build_empty_score_overlay_snapshot(title, current=None):
+    current = current or {}
+    item = score_overlay_default()
+    item.update({
+        "pk": SCORE_OVERLAY_PK,
+        "sk": SCORE_OVERLAY_SK,
+        "type": "OVERLAY_SCORE",
+        "title": str(title if title is not None else current.get("title", "")).strip()[:90],
+        "version": normalize_int(current.get("version"), 0, 0) + 1,
+        "updated_at": now_iso(),
+    })
+    return item
+
+
+def save_score_overlay(data):
+    title = str(data.get("title") or "").strip()
+    match_id = str(data.get("match_id") or "").strip()
+    current = get_score_overlay_item()
+    if not match_id:
+        item = build_empty_score_overlay_snapshot(title, current=current)
+        put_item(item)
+        return clean_score_overlay(item)
+    match = get_item("MATCH", match_id)
+    if not match:
+        raise ValueError("Partida nao encontrada.")
+    item = build_score_overlay_snapshot(title, match, current=current)
+    put_item(item)
+    return clean_score_overlay(item)
+
+
+def sync_score_overlay_for_match(match):
+    current = get_score_overlay_item()
+    if (
+        not current
+        or current.get("type") != "OVERLAY_SCORE"
+        or str(current.get("match_id") or "") != str(match.get("match_id") or "")
+    ):
+        return None
+    item = build_score_overlay_snapshot(current.get("title", ""), match, current=current)
+    put_item(item)
+    return clean_score_overlay(item)
 
 
 def match_passes_filters(match, filters):
@@ -876,6 +1046,7 @@ def apply_disciplinary_result(match, players_by_id):
 def persist_disciplinary_result(match):
     put_item(match)
     put_item(result_item_for_match(match, match.get("result_saved_at")))
+    sync_score_overlay_for_match(match)
 
 
 def disciplinary_players_for_match(match):
@@ -1281,6 +1452,7 @@ def set_match_result(data):
         match["result_saved_at"] = ""
         put_item(match)
         delete_item("RESULT", pair_key)
+        sync_score_overlay_for_match(match)
         return match
     double_loss = bool(data.get("double_loss"))
     if match.get("phase") == "knockout" and double_loss:
@@ -1288,12 +1460,15 @@ def set_match_result(data):
     winner_id = "" if double_loss else str(data.get("winner_id", ""))
     if not double_loss and winner_id not in [match.get("player1_id"), match.get("player2_id")]:
         raise ValueError("Selecione o vencedor ou marque derrota para ambos.")
-    balls_p1 = 0 if double_loss else normalize_int(data.get("balls_p1", 0), 0, 0, 7)
-    balls_p2 = 0 if double_loss else normalize_int(data.get("balls_p2", 0), 0, 0, 7)
-    if not double_loss and winner_id == match.get("player1_id"):
-        balls_p1 = 7
-    if not double_loss and winner_id == match.get("player2_id"):
-        balls_p2 = 7
+    is_knockout = match.get("phase") == "knockout"
+    score_max = 999 if is_knockout else 7
+    balls_p1 = 0 if double_loss else normalize_int(data.get("balls_p1", 0), 0, 0, score_max)
+    balls_p2 = 0 if double_loss else normalize_int(data.get("balls_p2", 0), 0, 0, score_max)
+    if not is_knockout:
+        if not double_loss and winner_id == match.get("player1_id"):
+            balls_p1 = 7
+        if not double_loss and winner_id == match.get("player2_id"):
+            balls_p2 = 7
     if (
         match.get("phase") == "knockout"
         and match.get("is_finished")
@@ -1311,6 +1486,7 @@ def set_match_result(data):
     match["updated_at"] = saved_at
     put_item(match)
     put_item(result_item_for_match(match, saved_at))
+    sync_score_overlay_for_match(match)
     return match
 
 
@@ -2992,6 +3168,9 @@ def handle_admin_mutation(event, action):
         if action == "tv-config":
             cfg = save_tv_config(data)
             return response(200, {"tv_config": cfg, "state": public_state()})
+        if action == "score-overlay":
+            item = save_score_overlay(data)
+            return response(200, {"score_overlay": item})
         if action == "player":
             item = upsert_player(data)
             return response(200, {"player": item, "state": public_state()})
@@ -3039,7 +3218,7 @@ def handle_admin_mutation(event, action):
             return response(200, {**result, "state": public_state()})
         if action == "result":
             item = set_match_result(data)
-            return response(200, {"match": item, "state": public_state()})
+            return response(200, {"match": item, "score_overlay": get_score_overlay_state(), "state": public_state()})
         if action == "tiebreak":
             item = save_tiebreak_decision(data)
             return response(200, {"tiebreak": item, "state": public_state()})
@@ -3082,6 +3261,9 @@ def lambda_handler(event, context):
             if filters["status"] not in {"finished", "pending"}:
                 filters["status"] = ""
             return response(200, {"matches": filtered_matches(get_matches(), filters)})
+
+        if method == "GET" and path == "/score-overlay/state":
+            return response(200, get_score_overlay_state(), {"Cache-Control": "no-store"})
 
         if method in {"GET", "HEAD"} and (path == "/perfil" or path.startswith("/perfil/")):
             slug = path.split("/perfil/", 1)[1] if path.startswith("/perfil/") else ""

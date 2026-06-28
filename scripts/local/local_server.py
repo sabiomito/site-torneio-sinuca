@@ -42,6 +42,8 @@ ROUTES = {
     "/telao/": "/telao.html",
     "/tv": "/telao.html",
     "/tv/": "/telao.html",
+    "/placar": "/placar.html",
+    "/placar/": "/placar.html",
     "/admin/jogador": "/admin-player.html",
     "/admin/jogador/": "/admin-player.html",
     "/admin/patrocinador": "/sponsor-edit.html",
